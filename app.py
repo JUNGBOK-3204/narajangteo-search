@@ -10,434 +10,433 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Border, Side, PatternFill, Font
 
 # ==========================================
-# 1. API 키 및 검색 기록 관리 기능 
+# 1. API 키 및 검색 기록 관리 기능
 # ==========================================
-HISTORY_FILE = "search_history.txt" [cite: 1]
+HISTORY_FILE = "search_history.txt"
 
-def load_api_key(): [cite: 1]
-    """세션에 저장된 키를 우선 확인하고, 없으면 빈 값을 반환합니다.""" [cite: 1]
-    if 'user_api_key' in st.session_state: [cite: 1]
-        return st.session_state['user_api_key'] [cite: 1]
-    return "" [cite: 1]
+def load_api_key():
+    """세션에 저장된 키를 확인합니다."""
+    if 'user_api_key' in st.session_state:
+        return st.session_state['user_api_key']
+    return ""
 
-def save_api_key(key): [cite: 1]
-    """입력받은 키를 현재 사용자의 세션에 저장합니다.""" [cite: 1]
-    st.session_state['user_api_key'] = key.strip() [cite: 1]
+def save_api_key(key):
+    """입력받은 키를 세션에 저장합니다."""
+    st.session_state['user_api_key'] = key.strip()
 
-def load_history(): [cite: 1]
-    if os.path.exists(HISTORY_FILE): [cite: 1]
-        try: [cite: 1]
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f: [cite: 1]
-                return [line.strip() for line in f.readlines() if line.strip()] [cite: 1]
-        except: return [] [cite: 1]
-    return [] [cite: 1]
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                return [line.strip() for line in f.readlines() if line.strip()]
+        except: return []
+    return []
 
-def add_history(record): [cite: 1]
-    history = load_history() [cite: 1]
-    history.insert(0, record) [cite: 1]
-    history = history[:5] [cite: 1]
-    try: [cite: 1]
-        with open(HISTORY_FILE, "w", encoding="utf-8") as f: [cite: 1]
-            for item in history: [cite: 1]
-                f.write(f"{item}\n") [cite: 1]
-    except: pass [cite: 1]
-
-# ==========================================
-# 2. 나라장터 API 수집 함수 
-# ==========================================
-ORDER_PLAN_URL = "https://apis.data.go.kr/1230000/ao/OrderPlanSttusService/getOrderPlanSttusListServcPPSSrch" [cite: 1]
-PRIOR_SPEC_URL = "https://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServcPPSSrch" [cite: 1]
-BID_NOTICE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch" [cite: 1]
-
-def fetch_data_from_api(url, params): [cite: 1]
-    all_items = [] [cite: 1]
-    page = 1 [cite: 1]
-    while True: [cite: 1]
-        params["pageNo"] = str(page) [cite: 1]
-        params["numOfRows"] = "500" [cite: 1]
-        try: [cite: 1]
-            response = requests.get(url, params=params, timeout=60) [cite: 1]
-            if response.status_code != 200: break [cite: 1]
-            root = ET.fromstring(response.text) [cite: 1]
-            items = root.findall(".//items/item") [cite: 1]
-            if not items: break [cite: 1]
-            for item in items: [cite: 1]
-                row_data = {child.tag: (child.text or "").strip() for child in list(item)} [cite: 1]
-                all_items.append(row_data) [cite: 1]
-            total_count_elem = root.find(".//body/totalCount") [cite: 1]
-            if total_count_elem is not None: [cite: 1]
-                if len(all_items) >= int(total_count_elem.text): break [cite: 1]
-            page += 1 [cite: 1]
-        except: break [cite: 1]
-    return all_items [cite: 1]
-
-def fetch_bid_data_split(service_key, keywords, months=12, progress_callback=None): [cite: 1]
-    all_results = [] [cite: 1]
-    now = datetime.now() [cite: 1]
-    for i in range(months): [cite: 1]
-        start_date = now - timedelta(days=(i + 1) * 30) [cite: 1]
-        end_date = now - timedelta(days=i * 30) [cite: 1]
-        bgn_str = start_date.strftime("%Y%m%d%H%M") [cite: 1]
-        end_str = end_date.strftime("%Y%m%d%H%M") [cite: 1]
-        for kw in keywords: [cite: 1]
-            p = {"serviceKey": service_key, "type": "xml", "inqryDiv": "1", [cite: 1]
-                 "inqryBgnDt": bgn_str, "inqryEndDt": end_str, "bidNtceNm": kw} [cite: 1]
-            all_results.extend(fetch_data_from_api(BID_NOTICE_URL, p)) [cite: 1]
-        if progress_callback: [cite: 1]
-            progress_callback(i + 1, months) [cite: 1]
-        time.sleep(0.1) [cite: 1]
-    return all_results [cite: 1]
+def add_history(record):
+    history = load_history()
+    history.insert(0, record)
+    history = history[:5]
+    try:
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            for item in history:
+                f.write(f"{item}\n")
+    except: pass
 
 # ==========================================
-# 3. 데이터 가공 함수 
+# 2. 나라장터 API 수집 함수
 # ==========================================
-def get_val(row, possible_keys, default=''): [cite: 1]
-    row_lower = {k.lower(): v for k, v in row.items()} [cite: 1]
-    for k in possible_keys: [cite: 1]
-        if k in row and pd.notna(row[k]) and str(row[k]).strip() != '': [cite: 1]
-            return str(row[k]).strip() [cite: 1]
-        k_lower = k.lower() [cite: 1]
-        if k_lower in row_lower and pd.notna(row_lower[k_lower]) and str(row_lower[k_lower]).strip() != '': [cite: 1]
-            return str(row_lower[k_lower]).strip() [cite: 1]
-    return default [cite: 1]
+ORDER_PLAN_URL = "https://apis.data.go.kr/1230000/ao/OrderPlanSttusService/getOrderPlanSttusListServcPPSSrch"
+PRIOR_SPEC_URL = "https://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServcPPSSrch"
+BID_NOTICE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch"
 
-def get_clean_val(row, possible_keys): [cite: 1]
-    val = get_val(row, possible_keys) [cite: 1]
-    return val if val else "" [cite: 1]
+def fetch_data_from_api(url, params):
+    all_items = []
+    page = 1
+    while True:
+        params["pageNo"] = str(page)
+        params["numOfRows"] = "500"
+        try:
+            response = requests.get(url, params=params, timeout=60)
+            if response.status_code != 200: break
+            root = ET.fromstring(response.text)
+            items = root.findall(".//items/item")
+            if not items: break
+            for item in items:
+                row_data = {child.tag: (child.text or "").strip() for child in list(item)}
+                all_items.append(row_data)
+            total_count_elem = root.find(".//body/totalCount")
+            if total_count_elem is not None:
+                if len(all_items) >= int(total_count_elem.text): break
+            page += 1
+        except: break
+    return all_items
 
-def apply_exclusion_filter(df, target_col, exclude_keywords): [cite: 1]
-    if df.empty or not exclude_keywords: [cite: 1]
-        return df [cite: 1]
-    mask = df[target_col].apply(lambda x: not any(exc in str(x) for exc in exclude_keywords)) [cite: 1]
-    return df[mask] [cite: 1]
-
-def process_order_for_excel(df, exclude_keywords=[]): [cite: 1]
-    if df is None or df.empty: return pd.DataFrame() [cite: 1]
-    new_df = pd.DataFrame() [cite: 1]
-    new_df['용역구분'] = df.apply(lambda r: '일반용역' if get_val(r, ['bsnsDivCd'])=='03' else ('기술용역' if get_val(r, ['bsnsDivCd'])=='05' else ''), axis=1) [cite: 1]
-    new_df['업무구분'] = df.apply(lambda r: get_val(r, ['bsnsTyNm', 'bztyNm']), axis=1) [cite: 1]
-    new_df['발주시기'] = df.apply(lambda r: f"{get_val(r,['orderYear'])}/{get_val(r,['orderMnth']).zfill(2)}" if get_val(r,['orderYear']) else '', axis=1) [cite: 1]
-    new_df['사업명'] = df.apply(lambda r: get_clean_val(r, ['bizNm', 'prdctClsfNoNm', 'prdctClsfcNoNm', 'cntrctNm']), axis=1) [cite: 1]
-    new_df['총발주금액(원)'] = df.apply(lambda r: int(float(get_val(r, ['sumOrderAmt', 'totlAmt'], '0').replace(',',''))), axis=1) [cite: 1]
-    new_df['발주기관명'] = df.apply(lambda r: get_clean_val(r, ['orderInsttNm', 'dmndInsttNm', 'realOrgNm']), axis=1) [cite: 1]
-    new_df['게시일자'] = df.apply(lambda r: get_val(r, ['nticeDt', 'opengDt']), axis=1) [cite: 1]
-    new_df = new_df[new_df['사업명'].str.strip() != ''].copy() [cite: 1]
-    if exclude_keywords: [cite: 1]
-        new_df = apply_exclusion_filter(new_df, '사업명', exclude_keywords) [cite: 1]
-    if '발주시기' in new_df.columns: [cite: 1]
-        new_df.sort_values(by='발주시기', ascending=True, inplace=True) [cite: 1]
-    new_df.reset_index(drop=True, inplace=True) [cite: 1]
-    new_df.insert(0, 'No.', range(1, len(new_df) + 1)) [cite: 1]
-    return new_df [cite: 1]
-
-def process_prior_for_excel(df, exclude_keywords=[]): [cite: 1]
-    if df is None or df.empty: return pd.DataFrame() [cite: 1]
-    col_map = { [cite: 1]
-        'bsnsDivNm': '업무구분', 'refNo': '참조번호', 'prdctClsfcNoNm': '사업명(품명)', [cite: 1]
-        'orderInsttNm': '공고기관', 'rlDminsttNm': '실수요기관', 'asignBdgtAmt': '배정예산액(원)', [cite: 1]
-        'rcptDt': '공개일시', 'opninRgstClseDt': '의견등록마감일시', 'ofclNm': '담당자명', [cite: 1]
-        'ofclTelNo': '담당자전화번호', 'swBizObjYn': 'SW사업여부', 'dlvrTmlmtDt': '납품기한', [cite: 1]
-        'dlvrDaynum': '납품일수', 'bfSpecRgstNo': '사전규격등록번호', 'specDocFileUrl1': '규격서URL', [cite: 1]
-        'rgstDt': '등록일시', 'chgDt': '변경일시', 'bidNtceNoList': '본공고번호(연계)' [cite: 1]
-    } [cite: 1]
-    new_df = pd.DataFrame() [cite: 1]
-    def parse_money(x): [cite: 1]
-        try: return int(float(str(x).replace(',', '').strip())) [cite: 1]
-        except: return 0 [cite: 1]
-    for tag, kr_col in col_map.items(): [cite: 1]
-        found_col = None [cite: 1]
-        for col in df.columns: [cite: 1]
-            if col.lower() == tag.lower(): [cite: 1]
-                found_col = col [cite: 1]
-                break [cite: 1]
-        if tag == 'asignBdgtAmt': [cite: 1]
-            new_df[kr_col] = df[found_col].apply(parse_money) if found_col else 0 [cite: 1]
-        else: [cite: 1]
-            new_df[kr_col] = df[found_col].fillna("") if found_col else "" [cite: 1]
-    new_df = new_df[new_df['사업명(품명)'].str.strip() != ''].copy() [cite: 1]
-    if exclude_keywords: [cite: 1]
-        new_df = apply_exclusion_filter(new_df, '사업명(품명)', exclude_keywords) [cite: 1]
-    if '공개일시' in new_df.columns: [cite: 1]
-        new_df.sort_values(by='공개일시', ascending=True, inplace=True) [cite: 1]
-    new_df.reset_index(drop=True, inplace=True) [cite: 1]
-    new_df.insert(0, 'No.', range(1, len(new_df) + 1)) [cite: 1]
-    return new_df [cite: 1]
-
-def process_bid_for_excel(df, exclude_keywords=[]): [cite: 1]
-    if df is None or df.empty: return pd.DataFrame() [cite: 1]
-    col_map = { [cite: 1]
-        'bidNtceNo': '공고번호', 'bidNtceOrd': '차수', 'reNtceYn': '재공고여부', 'bidNtceNm': '공고명', [cite: 1]
-        'ntceKindNm': '공고종류', 'bidMethdNm': '입찰방식', 'cntrctCnclsMthdNm': '계약방법', [cite: 1]
-        'sucsfbidMthdNm': '낙찰자결정방법', 'ntceInsttNm': '공고기관', 'dminsttNm': '수요기관', [cite: 1]
-        'ntceInsttOfclNm': '담당자명', 'ntceInsttOfclTelNo': '담당자전화번호', 'bidNtceDt': '게시일시', [cite: 1]
-        'bidBeginDt': '입찰개시일시', 'bidClseDt': '입찰마감일시', 'opengDt': '개찰일시', [cite: 1]
-        'bidQlfctRgstDt': '입찰참가자격등록마감일시', 'asignBdgtAmt': '배정예산(원)', [cite: 1]
-        'presmptPrce': '추정가격(원)', 'bidPrtcptFee': '입찰참가수수료', 'bidNtceUrl': '공고링크(URL)', [cite: 1]
-        'bfSpecRgstNo': '사전규격등록번호', 'refNo': '참조번호', 'cmmnSpldmdMethdNm': '공동수급여부', [cite: 1]
-        'prearngPrceDcsnMthdNm': '예가방식', 'opengPlce': '개찰장소', 'brffcBidprcPermsnYn': '지사투찰허용여부' [cite: 1]
-    } [cite: 1]
-    new_df = pd.DataFrame() [cite: 1]
-    def parse_money(x): [cite: 1]
-        try: return int(float(str(x).replace(',', '').strip())) [cite: 1]
-        except: return 0 [cite: 1]
-    for tag, kr_col in col_map.items(): [cite: 1]
-        found_col = None [cite: 1]
-        for col in df.columns: [cite: 1]
-            if col.lower() == tag.lower(): [cite: 1]
-                found_col = col [cite: 1]
-                break [cite: 1]
-        if tag in ['asignBdgtAmt', 'presmptPrce', 'bidPrtcptFee']: [cite: 1]
-            new_df[kr_col] = df[found_col].apply(parse_money) if found_col else 0 [cite: 1]
-        else: [cite: 1]
-            new_df[kr_col] = df[found_col].fillna("") if found_col else "" [cite: 1]
-    def calc_min_bid(row): [cite: 1]
-        budget = row['배정예산(원)'] [cite: 1]
-        estim = row['추정가격(원)'] [cite: 1]
-        base_price = budget if budget > 0 else estim [cite: 1]
-        if base_price > 0: return int(base_price * 0.87745) [cite: 1]
-        return 0 [cite: 1]
-    new_df['예상 투찰하한가(원)'] = new_df.apply(calc_min_bid, axis=1) [cite: 1]
-    new_df = new_df[new_df['공고명'].str.strip() != ''].copy() [cite: 1]
-    if exclude_keywords: [cite: 1]
-        new_df = apply_exclusion_filter(new_df, '공고명', exclude_keywords) [cite: 1]
-    if '게시일시' in new_df.columns: [cite: 1]
-        new_df.sort_values(by='게시일시', ascending=True, inplace=True) [cite: 1]
-    new_df.reset_index(drop=True, inplace=True) [cite: 1]
-    new_df.insert(0, 'No.', range(1, len(new_df) + 1)) [cite: 1]
-    return new_df [cite: 1]
+def fetch_bid_data_split(service_key, keywords, months=12, progress_callback=None):
+    all_results = []
+    now = datetime.now()
+    for i in range(months):
+        start_date = now - timedelta(days=(i + 1) * 30)
+        end_date = now - timedelta(days=i * 30)
+        bgn_str = start_date.strftime("%Y%m%d%H%M")
+        end_str = end_date.strftime("%Y%m%d%H%M")
+        for kw in keywords:
+            p = {"serviceKey": service_key, "type": "xml", "inqryDiv": "1",
+                 "inqryBgnDt": bgn_str, "inqryEndDt": end_str, "bidNtceNm": kw}
+            all_results.extend(fetch_data_from_api(BID_NOTICE_URL, p))
+        if progress_callback:
+            progress_callback(i + 1, months)
+        time.sleep(0.1)
+    return all_results
 
 # ==========================================
-# 4. 엑셀 서식화 
+# 3. 데이터 가공 함수
 # ==========================================
-def convert_df_to_excel(df_order, df_prior, df_bid): [cite: 1]
-    output = BytesIO() [cite: 1]
-    with pd.ExcelWriter(output, engine='openpyxl') as writer: [cite: 1]
-        align_rules = { [cite: 1]
-            '발주계획': {'left': ['사업명', '발주기관명'], 'right': ['총발주금액(원)']}, [cite: 1]
-            '사전규격공개': {'left': ['사업명(품명)', '공고기관', '실수요기관'], 'right': ['배정예산액(원)']}, [cite: 1]
-            '입찰공고': {'left': ['공고명', '공고기관', '수요기관'], 'right': ['배정예산(원)', '추정가격(원)', '입찰참가수수료', '예상 투찰하한가(원)']} [cite: 1]
-        } [cite: 1]
-        custom_widths = {'발주계획': {'사업명': 60}, '사전규격공개': {'사업명(품명)': 60}, '입찰공고': {'공고명': 60, '개찰장소': 32}} [cite: 1]
-        header_fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid") [cite: 1]
-        urgent_font = Font(color="FF0000", bold=True) [cite: 1]
-        link_font = Font(color="0000FF", underline="single") [cite: 1]
-        yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid") [cite: 1]
-        now = datetime.now() [cite: 1]
+def get_val(row, possible_keys, default=''):
+    row_lower = {k.lower(): v for k, v in row.items()}
+    for k in possible_keys:
+        if k in row and pd.notna(row[k]) and str(row[k]).strip() != '':
+            return str(row[k]).strip()
+        k_lower = k.lower()
+        if k_lower in row_lower and pd.notna(row_lower[k_lower]) and str(row_lower[k_lower]).strip() != '':
+            return str(row_lower[k_lower]).strip()
+    return default
 
-        def apply_styles(df, sheet_name): [cite: 1]
-            if df is None: return [cite: 1]
-            if df.empty: [cite: 1]
-                pd.DataFrame({'결과': ['조건에 맞는 검색 결과가 없습니다.']}).to_excel(writer, index=False, sheet_name=sheet_name) [cite: 1]
-                return [cite: 1]
-            df.to_excel(writer, index=False, sheet_name=sheet_name) [cite: 1]
-            ws = writer.sheets[sheet_name] [cite: 1]
-            ws.auto_filter.ref = ws.dimensions [cite: 1]
-            money_cols = ['총발주금액(원)', '배정예산액(원)', '배정예산(원)', '추정가격(원)', '입찰참가수수료', '예상 투찰하한가(원)'] [cite: 1]
-            rules = align_rules.get(sheet_name, {'left': [], 'right': []}) [cite: 1]
-            wide_cols = rules['left'] [cite: 1]
-            sheet_custom_widths = custom_widths.get(sheet_name, {}) [cite: 1]
-            header_map = {} [cite: 1]
-            deadline_col_idx = -1 [cite: 1]
-            for idx, cell in enumerate(ws[1]): [cite: 1]
-                header_map[cell.column] = cell.value [cite: 1]
-                if cell.value == '입찰마감일시': deadline_col_idx = idx [cite: 1]
+def get_clean_val(row, possible_keys):
+    val = get_val(row, possible_keys)
+    return val if val else ""
 
-            for column in ws.columns: [cite: 1]
-                column_letter = get_column_letter(column[0].column) [cite: 1]
-                col_name = header_map.get(column[0].column) [cite: 1]
-                if col_name in sheet_custom_widths: [cite: 1]
-                    ws.column_dimensions[column_letter].width = sheet_custom_widths[col_name] [cite: 1]
-                    continue [cite: 1]
-                max_length = 0 [cite: 1]
-                for cell in column: [cite: 1]
-                    try: [cite: 1]
-                        if cell.value: [cite: 1]
-                            cell_len = len(str(cell.value)) [cite: 1]
-                            if cell_len > max_length: max_length = cell_len [cite: 1]
-                    except: pass [cite: 1]
-                adjusted_width = (max_length + 7) * 1.4 if col_name in wide_cols else (max_length + 5) * 1.3 [cite: 1]
-                if adjusted_width > 120: adjusted_width = 120 [cite: 1]
-                ws.column_dimensions[column_letter].width = adjusted_width [cite: 1]
+def apply_exclusion_filter(df, target_col, exclude_keywords):
+    if df.empty or not exclude_keywords:
+        return df
+    mask = df[target_col].apply(lambda x: not any(exc in str(x) for exc in exclude_keywords))
+    return df[mask]
 
-            for row in ws.iter_rows(min_row=2): [cite: 1]
-                is_urgent = False [cite: 1]
-                if deadline_col_idx != -1: [cite: 1]
-                    try: [cite: 1]
-                        cell_val = row[deadline_col_idx].value [cite: 1]
-                        if cell_val: [cite: 1]
-                            deadline = pd.to_datetime(str(cell_val)) [cite: 1]
-                            if (deadline - now).days <= 7 and (deadline > now): is_urgent = True [cite: 1]
-                    except: pass [cite: 1]
-                for cell in row: [cite: 1]
-                    cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin')) [cite: 1]
-                    col_name = header_map.get(cell.column) [cite: 1]
-                    if col_name in money_cols and isinstance(cell.value, (int, float)): cell.number_format = '#,##0' [cite: 1]
-                    if col_name in rules['left']: cell.alignment = Alignment(horizontal='left', vertical='center', indent=1) [cite: 1]
-                    elif col_name in rules['right']: cell.alignment = Alignment(horizontal='right', vertical='center', indent=1) [cite: 1]
-                    else: cell.alignment = Alignment(horizontal='center', vertical='center') [cite: 1]
-                    if is_urgent: [cite: 1]
-                        cell.font = urgent_font [cite: 1]
-                        cell.fill = yellow_fill [cite: 1]
-                    if col_name in ['규격서URL', '공고링크(URL)'] and cell.value: [cite: 1]
-                        val = str(cell.value) [cite: 1]
-                        if val.startswith("http"): [cite: 1]
-                            cell.hyperlink = val [cite: 1]
-                            cell.font = link_font [cite: 1]
-                            if is_urgent: cell.fill = yellow_fill [cite: 1]
+def process_order_for_excel(df, exclude_keywords=[]):
+    if df is None or df.empty: return pd.DataFrame()
+    new_df = pd.DataFrame()
+    new_df['용역구분'] = df.apply(lambda r: '일반용역' if get_val(r, ['bsnsDivCd'])=='03' else ('기술용역' if get_val(r, ['bsnsDivCd'])=='05' else ''), axis=1)
+    new_df['업무구분'] = df.apply(lambda r: get_val(r, ['bsnsTyNm', 'bztyNm']), axis=1)
+    new_df['발주시기'] = df.apply(lambda r: f"{get_val(r,['orderYear'])}/{get_val(r,['orderMnth']).zfill(2)}" if get_val(r,['orderYear']) else '', axis=1)
+    new_df['사업명'] = df.apply(lambda r: get_clean_val(r, ['bizNm', 'prdctClsfNoNm', 'prdctClsfcNoNm', 'cntrctNm']), axis=1)
+    new_df['총발주금액(원)'] = df.apply(lambda r: int(float(get_val(r, ['sumOrderAmt', 'totlAmt'], '0').replace(',',''))), axis=1)
+    new_df['발주기관명'] = df.apply(lambda r: get_clean_val(r, ['orderInsttNm', 'dmndInsttNm', 'realOrgNm']), axis=1)
+    new_df['게시일자'] = df.apply(lambda r: get_val(r, ['nticeDt', 'opengDt']), axis=1)
+    new_df = new_df[new_df['사업명'].str.strip() != ''].copy()
+    if exclude_keywords:
+        new_df = apply_exclusion_filter(new_df, '사업명', exclude_keywords)
+    if '발주시기' in new_df.columns:
+        new_df.sort_values(by='발주시기', ascending=True, inplace=True)
+    new_df.reset_index(drop=True, inplace=True)
+    new_df.insert(0, 'No.', range(1, len(new_df) + 1))
+    return new_df
 
-            for cell in ws[1]: [cite: 1]
-                cell.alignment = Alignment(horizontal='center', vertical='center') [cite: 1]
-                cell.fill = header_fill [cite: 1]
-                cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin')) [cite: 1]
+def process_prior_for_excel(df, exclude_keywords=[]):
+    if df is None or df.empty: return pd.DataFrame()
+    col_map = {
+        'bsnsDivNm': '업무구분', 'refNo': '참조번호', 'prdctClsfcNoNm': '사업명(품명)',
+        'orderInsttNm': '공고기관', 'rlDminsttNm': '실수요기관', 'asignBdgtAmt': '배정예산액(원)',
+        'rcptDt': '공개일시', 'opninRgstClseDt': '의견등록마감일시', 'ofclNm': '담당자명',
+        'ofclTelNo': '담당자전화번호', 'swBizObjYn': 'SW사업여부', 'dlvrTmlmtDt': '납품기한',
+        'dlvrDaynum': '납품일수', 'bfSpecRgstNo': '사전규격등록번호', 'specDocFileUrl1': '규격서URL',
+        'rgstDt': '등록일시', 'chgDt': '변경일시', 'bidNtceNoList': '본공고번호(연계)'
+    }
+    new_df = pd.DataFrame()
+    def parse_money(x):
+        try: return int(float(str(x).replace(',', '').strip()))
+        except: return 0
+    for tag, kr_col in col_map.items():
+        found_col = None
+        for col in df.columns:
+            if col.lower() == tag.lower():
+                found_col = col
+                break
+        if tag == 'asignBdgtAmt':
+            new_df[kr_col] = df[found_col].apply(parse_money) if found_col else 0
+        else:
+            new_df[kr_col] = df[found_col].fillna("") if found_col else ""
+    new_df = new_df[new_df['사업명(품명)'].str.strip() != ''].copy()
+    if exclude_keywords:
+        new_df = apply_exclusion_filter(new_df, '사업명(품명)', exclude_keywords)
+    if '공개일시' in new_df.columns:
+        new_df.sort_values(by='공개일시', ascending=True, inplace=True)
+    new_df.reset_index(drop=True, inplace=True)
+    new_df.insert(0, 'No.', range(1, len(new_df) + 1))
+    return new_df
 
-        apply_styles(df_order, '발주계획') [cite: 1]
-        apply_styles(df_prior, '사전규격공개') [cite: 1]
-        apply_styles(df_bid, '입찰공고') [cite: 1]
-    return output.getvalue() [cite: 1]
+def process_bid_for_excel(df, exclude_keywords=[]):
+    if df is None or df.empty: return pd.DataFrame()
+    col_map = {
+        'bidNtceNo': '공고번호', 'bidNtceOrd': '차수', 'reNtceYn': '재공고여부', 'bidNtceNm': '공고명',
+        'ntceKindNm': '공고종류', 'bidMethdNm': '입찰방식', 'cntrctCnclsMthdNm': '계약방법',
+        'sucsfbidMthdNm': '낙찰자결정방법', 'ntceInsttNm': '공고기관', 'dminsttNm': '수요기관',
+        'ntceInsttOfclNm': '담당자명', 'ntceInsttOfclTelNo': '담당자전화번호', 'bidNtceDt': '게시일시',
+        'bidBeginDt': '입찰개시일시', 'bidClseDt': '입찰마감일시', 'opengDt': '개찰일시',
+        'bidQlfctRgstDt': '입찰참가자격등록마감일시', 'asignBdgtAmt': '배정예산(원)',
+        'presmptPrce': '추정가격(원)', 'bidPrtcptFee': '입찰참가수수료', 'bidNtceUrl': '공고링크(URL)',
+        'bfSpecRgstNo': '사전규격등록번호', 'refNo': '참조번호', 'cmmnSpldmdMethdNm': '공동수급여부',
+        'prearngPrceDcsnMthdNm': '예가방식', 'opengPlce': '개찰장소', 'brffcBidprcPermsnYn': '지사투찰허용여부'
+    }
+    new_df = pd.DataFrame()
+    def parse_money(x):
+        try: return int(float(str(x).replace(',', '').strip()))
+        except: return 0
+    for tag, kr_col in col_map.items():
+        found_col = None
+        for col in df.columns:
+            if col.lower() == tag.lower():
+                found_col = col
+                break
+        if tag in ['asignBdgtAmt', 'presmptPrce', 'bidPrtcptFee']:
+            new_df[kr_col] = df[found_col].apply(parse_money) if found_col else 0
+        else:
+            new_df[kr_col] = df[found_col].fillna("") if found_col else ""
+    def calc_min_bid(row):
+        budget = row['배정예산(원)']
+        estim = row['추정가격(원)']
+        base_price = budget if budget > 0 else estim
+        if base_price > 0: return int(base_price * 0.87745)
+        return 0
+    new_df['예상 투찰하한가(원)'] = new_df.apply(calc_min_bid, axis=1)
+    new_df = new_df[new_df['공고명'].str.strip() != ''].copy()
+    if exclude_keywords:
+        new_df = apply_exclusion_filter(new_df, '공고명', exclude_keywords)
+    if '게시일시' in new_df.columns:
+        new_df.sort_values(by='게시일시', ascending=True, inplace=True)
+    new_df.reset_index(drop=True, inplace=True)
+    new_df.insert(0, 'No.', range(1, len(new_df) + 1))
+    return new_df
 
 # ==========================================
-# 5. UI 및 메인 로직 
+# 4. 엑셀 서식화
 # ==========================================
-st.set_page_config(page_title="나라장터 검색 시스템", layout="wide") [cite: 1]
+def convert_df_to_excel(df_order, df_prior, df_bid):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        align_rules = {
+            '발주계획': {'left': ['사업명', '발주기관명'], 'right': ['총발주금액(원)']},
+            '사전규격공개': {'left': ['사업명(품명)', '공고기관', '실수요기관'], 'right': ['배정예산액(원)']},
+            '입찰공고': {'left': ['공고명', '공고기관', '수요기관'], 'right': ['배정예산(원)', '추정가격(원)', '입찰참가수수료', '예상 투찰하한가(원)']}
+        }
+        custom_widths = {'발주계획': {'사업명': 60}, '사전규격공개': {'사업명(품명)': 60}, '입찰공고': {'공고명': 60, '개찰장소': 32}}
+        header_fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
+        urgent_font = Font(color="FF0000", bold=True)
+        link_font = Font(color="0000FF", underline="single")
+        yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+        now = datetime.now()
 
-if 'df_order' not in st.session_state: st.session_state.df_order = None [cite: 1]
-if 'df_prior' not in st.session_state: st.session_state.df_prior = None [cite: 1]
-if 'df_bid' not in st.session_state: st.session_state.df_bid = None [cite: 1]
+        def apply_styles(df, sheet_name):
+            if df is None: return
+            if df.empty:
+                pd.DataFrame({'결과': ['조건에 맞는 검색 결과가 없습니다.']}).to_excel(writer, index=False, sheet_name=sheet_name)
+                return
+            df.to_excel(writer, index=False, sheet_name=sheet_name)
+            ws = writer.sheets[sheet_name]
+            ws.auto_filter.ref = ws.dimensions
+            money_cols = ['총발주금액(원)', '배정예산액(원)', '배정예산(원)', '추정가격(원)', '입찰참가수수료', '예상 투찰하한가(원)']
+            rules = align_rules.get(sheet_name, {'left': [], 'right': []})
+            wide_cols = rules['left']
+            sheet_custom_widths = custom_widths.get(sheet_name, {})
+            header_map = {}
+            deadline_col_idx = -1
+            for idx, cell in enumerate(ws[1]):
+                header_map[cell.column] = cell.value
+                if cell.value == '입찰마감일시': deadline_col_idx = idx
 
-LOGO_FILENAME = "radsol_logo.png" [cite: 1]
-col1, col2, col3, col4 = st.columns([1, 6, 1.5, 1.5]) [cite: 1]
-with col1: [cite: 1]
-    if os.path.exists(LOGO_FILENAME): st.image(LOGO_FILENAME, use_container_width=True) [cite: 1]
-with col2: [cite: 1]
+            for column in ws.columns:
+                column_letter = get_column_letter(column[0].column)
+                col_name = header_map.get(column[0].column)
+                if col_name in sheet_custom_widths:
+                    ws.column_dimensions[column_letter].width = sheet_custom_widths[col_name]
+                    continue
+                max_length = 0
+                for cell in column:
+                    try:
+                        if cell.value:
+                            cell_len = len(str(cell.value))
+                            if cell_len > max_length: max_length = cell_len
+                    except: pass
+                adjusted_width = (max_length + 7) * 1.4 if col_name in wide_cols else (max_length + 5) * 1.3
+                if adjusted_width > 120: adjusted_width = 120
+                ws.column_dimensions[column_letter].width = adjusted_width
+
+            for row in ws.iter_rows(min_row=2):
+                is_urgent = False
+                if deadline_col_idx != -1:
+                    try:
+                        cell_val = row[deadline_col_idx].value
+                        if cell_val:
+                            deadline = pd.to_datetime(str(cell_val))
+                            if (deadline - now).days <= 7 and (deadline > now): is_urgent = True
+                    except: pass
+                for cell in row:
+                    cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+                    col_name = header_map.get(cell.column)
+                    if col_name in money_cols and isinstance(cell.value, (int, float)): cell.number_format = '#,##0'
+                    if col_name in rules['left']: cell.alignment = Alignment(horizontal='left', vertical='center', indent=1)
+                    elif col_name in rules['right']: cell.alignment = Alignment(horizontal='right', vertical='center', indent=1)
+                    else: cell.alignment = Alignment(horizontal='center', vertical='center')
+                    if is_urgent:
+                        cell.font = urgent_font
+                        cell.fill = yellow_fill
+                    if col_name in ['규격서URL', '공고링크(URL)'] and cell.value:
+                        val = str(cell.value)
+                        if val.startswith("http"):
+                            cell.hyperlink = val
+                            cell.font = link_font
+                            if is_urgent: cell.fill = yellow_fill
+
+            for cell in ws[1]:
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+                cell.fill = header_fill
+                cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+        apply_styles(df_order, '발주계획')
+        apply_styles(df_prior, '사전규격공개')
+        apply_styles(df_bid, '입찰공고')
+    return output.getvalue()
+
+# ==========================================
+# 5. UI 및 메인 로직
+# ==========================================
+st.set_page_config(page_title="나라장터 검색 시스템", layout="wide")
+
+if 'df_order' not in st.session_state: st.session_state.df_order = None
+if 'df_prior' not in st.session_state: st.session_state.df_prior = None
+if 'df_bid' not in st.session_state: st.session_state.df_bid = None
+
+LOGO_FILENAME = "radsol_logo.png"
+col1, col2, col3, col4 = st.columns([1, 6, 1.5, 1.5])
+with col1:
+    if os.path.exists(LOGO_FILENAME): st.image(LOGO_FILENAME, use_container_width=True)
+with col2:
     st.markdown("""
         # 나라장터 용역&입찰 검색 시스템 <span style='font-size: 0.5em; color: #cccccc;'>v0.1 &nbsp;&nbsp; by 연구관리팀</span>
         <div style='margin-top: 5px;'>
             <span style='font-size: 15px; color: red; font-weight: bold;'>※ 본 프로그램의 검색 결과는 오류가 발생할 수 있으므로, 중요한 데이터는 꼭 나라장터 홈페이지를 확인할 것!</span>
         </div>
-        """, unsafe_allow_html=True) [cite: 1]
-with col3: [cite: 1]
-    st.markdown("<div style='margin-top: 22px;'></div>", unsafe_allow_html=True) [cite: 1]
-    search_clicked = st.button("🔍 조회 시작", use_container_width=True) [cite: 1]
-with col4: [cite: 1]
-    st.markdown("<div style='margin-top: 22px;'></div>", unsafe_allow_html=True) [cite: 1]
-    download_container = st.empty() [cite: 1]
+        """, unsafe_allow_html=True)
+with col3:
+    st.markdown("<div style='margin-top: 22px;'></div>", unsafe_allow_html=True)
+    search_clicked = st.button("🔍 조회 시작", use_container_width=True)
+with col4:
+    st.markdown("<div style='margin-top: 22px;'></div>", unsafe_allow_html=True)
+    download_container = st.empty()
 
-with st.sidebar: [cite: 1]
-    st.header("⚙️ 검색 설정") [cite: 1]
+with st.sidebar:
+    st.header("⚙️ 검색 설정")
     
-    saved_key = load_api_key() [cite: 1]
-    with st.expander("🔐 내 API Key 설정", expanded=(not saved_key)): [cite: 1]
-        service_key_input = st.text_input("공공데이터포털 인증키", value=saved_key, type="password", help="본인의 개인 인증키를 입력하세요. 이 키는 세션이 유지되는 동안에만 사용됩니다.") [cite: 1]
-        if st.button("인증키 적용하기"): [cite: 1]
-            if service_key_input: [cite: 1]
-                save_api_key(service_key_input) [cite: 1]
-                st.success("인증키가 적용되었습니다!") [cite: 1]
-                st.rerun() [cite: 1]
+    saved_key = load_api_key()
+    with st.expander("🔐 내 API Key 설정", expanded=(not saved_key)):
+        service_key_input = st.text_input("공공데이터포털 인증키", value=saved_key, type="password", help="본인의 개인 인증키를 입력하세요. 이 키는 세션이 유지되는 동안에만 사용됩니다.")
+        if st.button("인증키 적용하기"):
+            if service_key_input:
+                save_api_key(service_key_input)
+                st.success("인증키가 적용되었습니다!")
+                st.rerun()
     
-    service_key = load_api_key() [cite: 1]
+    service_key = load_api_key()
     
-    if service_key: [cite: 1]
-        st.caption("✅ 인증키가 설정되었습니다.") [cite: 1]
-    else: [cite: 1]
-        st.error("⛔ 조회를 위해 API 인증키 입력이 필요합니다.") [cite: 1]
+    if service_key:
+        st.caption("✅ 인증키가 설정되었습니다.")
+    else:
+        st.error("⛔ 조회를 위해 API 인증키 입력이 필요합니다.")
 
-    st.divider() [cite: 1]
-    st.subheader("📋 조회 대상 선택") [cite: 1]
-    # 🎨 문구 위치를 소제목 바로 아래로 이동 
-    st.markdown("<div style='color: #666666; font-size: 15px; font-weight: bold; margin-top: -10px; margin-bottom: 10px;'>(일반/기술용역만 조회함)</div>", unsafe_allow_html=True) [cite: 1]
+    st.divider()
+    st.subheader("📋 조회 대상 선택")
+    st.markdown("<div style='color: #666666; font-size: 15px; font-weight: bold; margin-top: -10px; margin-bottom: 10px;'>(일반/기술용역만 조회함)</div>", unsafe_allow_html=True)
     
-    check_order = st.checkbox("발주계획", value=True) [cite: 1]
-    check_prior = st.checkbox("사전규격공개", value=True) [cite: 1]
-    check_bid = st.checkbox("입찰공고", value=True) [cite: 1]
+    check_order = st.checkbox("발주계획", value=True)
+    check_prior = st.checkbox("사전규격공개", value=True)
+    check_bid = st.checkbox("입찰공고", value=True)
     
-    st.divider() [cite: 1]
+    st.divider()
 
-    keywords_input = st.text_input("🔑 키워드 (쉼표로 구분)", value="방사능") [cite: 1]
-    keywords = [k.strip() for k in keywords_input.split(",") if k.strip()] [cite: 1]
-    exclude_input = st.text_input("🚫 제외 키워드", value="유지보수, X-ray") [cite: 1]
-    exclude_keywords = [k.strip() for k in exclude_input.split(",") if k.strip()] [cite: 1]
+    keywords_input = st.text_input("🔑 키워드 (쉼표로 구분)", value="방사능")
+    keywords = [k.strip() for k in keywords_input.split(",") if k.strip()]
+    exclude_input = st.text_input("🚫 제외 키워드", value="유지보수, X-ray")
+    exclude_keywords = [k.strip() for k in exclude_input.split(",") if k.strip()]
     
-    st.divider() [cite: 1]
-    year = int(st.number_input("조회 연도 설정", min_value=2000, value=2026)) [cite: 1]
-    bid_months = st.slider("입찰공고 수집 기간 (최근 N개월)", 1, 12, 3) [cite: 1]
+    st.divider()
+    year = int(st.number_input("조회 연도 설정", min_value=2000, value=2026))
+    bid_months = st.slider("입찰공고 수집 기간 (최근 N개월)", 1, 12, 3)
     
-    st.divider() [cite: 1]
-    history_container = st.empty() [cite: 1]
-    def update_history_ui(): [cite: 1]
-        with history_container.container(): [cite: 1]
-            st.subheader("🕒 최근 조회 (공용)") [cite: 1]
-            for h in load_history(): st.caption(f"• {h}") [cite: 1]
-    update_history_ui() [cite: 1]
+    st.divider()
+    history_container = st.empty()
+    def update_history_ui():
+        with history_container.container():
+            st.subheader("🕒 최근 조회 (공용)")
+            for h in load_history(): st.caption(f"• {h}")
+    update_history_ui()
 
-if search_clicked: [cite: 1]
-    if not service_key: [cite: 1]
-        st.warning("먼저 사이드바에서 API 인증키를 입력하고 [적용하기]를 눌러주세요.") [cite: 1]
-    else: [cite: 1]
-        st.session_state.df_order = None [cite: 1]
-        st.session_state.df_prior = None [cite: 1]
-        st.session_state.df_bid = None [cite: 1]
-        prog_bar = st.progress(0, text="데이터 수집 시작...") [cite: 1]
-        inqry_bgn, inqry_end = f"{year}01010000", f"{year}12312359" [cite: 1]
-        total_kw = len(keywords) [cite: 1]
+if search_clicked:
+    if not service_key:
+        st.warning("먼저 사이드바에서 API 인증키를 입력하고 [적용하기]를 눌러주세요.")
+    else:
+        st.session_state.df_order = None
+        st.session_state.df_prior = None
+        st.session_state.df_bid = None
+        prog_bar = st.progress(0, text="데이터 수집 시작...")
+        inqry_bgn, inqry_end = f"{year}01010000", f"{year}12312359"
+        total_kw = len(keywords)
         
-        if check_order or check_prior: [cite: 1]
-            all_o, all_p = [], [] [cite: 1]
-            for idx, kw in enumerate(keywords): [cite: 1]
-                current_progress = int(40 * (idx + 1) / (total_kw if total_kw > 0 else 1)) [cite: 1]
-                prog_bar.progress(current_progress, text=f"🔍 공고 조회 중... ({kw})") [cite: 1]
-                if check_order: [cite: 1]
-                    for cd in ["03", "05"]: [cite: 1]
-                        all_o.extend(fetch_data_from_api(ORDER_PLAN_URL, {"serviceKey": service_key, "type": "xml", "inqryBgnDt": inqry_bgn, "inqryEndDt": inqry_end, "orderBgnYm": f"{year-1}12", "orderEndYm": f"{year}12", "bsnsDivCd": cd, "bizNm": kw})) [cite: 1]
-                if check_prior: [cite: 1]
-                    all_p.extend(fetch_data_from_api(PRIOR_SPEC_URL, {"serviceKey": service_key, "type": "xml", "inqryDiv": "1", "inqryBgnDt": inqry_bgn, "inqryEndDt": inqry_end, "prdctClsfcNoNm": kw})) [cite: 1]
-            if check_order: st.session_state.df_order = process_order_for_excel(pd.DataFrame(all_o).drop_duplicates(), exclude_keywords) [cite: 1]
-            if check_prior: st.session_state.df_prior = process_prior_for_excel(pd.DataFrame(all_p).drop_duplicates(), exclude_keywords) [cite: 1]
+        if check_order or check_prior:
+            all_o, all_p = [], []
+            for idx, kw in enumerate(keywords):
+                current_progress = int(40 * (idx + 1) / (total_kw if total_kw > 0 else 1))
+                prog_bar.progress(current_progress, text=f"🔍 공고 조회 중... ({kw})")
+                if check_order:
+                    for cd in ["03", "05"]:
+                        all_o.extend(fetch_data_from_api(ORDER_PLAN_URL, {"serviceKey": service_key, "type": "xml", "inqryBgnDt": inqry_bgn, "inqryEndDt": inqry_end, "orderBgnYm": f"{year-1}12", "orderEndYm": f"{year}12", "bsnsDivCd": cd, "bizNm": kw}))
+                if check_prior:
+                    all_p.extend(fetch_data_from_api(PRIOR_SPEC_URL, {"serviceKey": service_key, "type": "xml", "inqryDiv": "1", "inqryBgnDt": inqry_bgn, "inqryEndDt": inqry_end, "prdctClsfcNoNm": kw}))
+            if check_order: st.session_state.df_order = process_order_for_excel(pd.DataFrame(all_o).drop_duplicates(), exclude_keywords)
+            if check_prior: st.session_state.df_prior = process_prior_for_excel(pd.DataFrame(all_p).drop_duplicates(), exclude_keywords)
 
-        if check_bid: [cite: 1]
-            def bid_progress_update(current, total): [cite: 1]
-                percent = 40 + int(60 * (current / total)) [cite: 1]
-                prog_bar.progress(min(percent, 100), text=f"📥 입찰공고 수집 중... ({current}/{total}개월)") [cite: 1]
-            all_b = fetch_bid_data_split(service_key, keywords, months=bid_months, progress_callback=bid_progress_update) [cite: 1]
-            st.session_state.df_bid = process_bid_for_excel(pd.DataFrame(all_b).drop_duplicates(), exclude_keywords) [cite: 1]
+        if check_bid:
+            def bid_progress_update(current, total):
+                percent = 40 + int(60 * (current / total))
+                prog_bar.progress(min(percent, 100), text=f"📥 입찰공고 수집 중... ({current}/{total}개월)")
+            all_b = fetch_bid_data_split(service_key, keywords, months=bid_months, progress_callback=bid_progress_update)
+            st.session_state.df_bid = process_bid_for_excel(pd.DataFrame(all_b).drop_duplicates(), exclude_keywords)
         
-        prog_bar.progress(100, text="✅ 완료!") [cite: 1]
-        time.sleep(0.5); prog_bar.empty() [cite: 1]
+        prog_bar.progress(100, text="✅ 완료!")
+        time.sleep(0.5); prog_bar.empty()
         
-        cnt_o = len(st.session_state.df_order) if st.session_state.df_order is not None else 0 [cite: 1]
-        cnt_p = len(st.session_state.df_prior) if st.session_state.df_prior is not None else 0 [cite: 1]
-        cnt_b = len(st.session_state.df_bid) if st.session_state.df_bid is not None else 0 [cite: 1]
-        st.success(f"✅ 조회가 완료되었습니다! [ 발주: {cnt_o}건 / 사전: {cnt_p}건 / 입찰: {cnt_b}건 ]") [cite: 1]
+        cnt_o = len(st.session_state.df_order) if st.session_state.df_order is not None else 0
+        cnt_p = len(st.session_state.df_prior) if st.session_state.df_prior is not None else 0
+        cnt_b = len(st.session_state.df_bid) if st.session_state.df_bid is not None else 0
+        st.success(f"✅ 조회가 완료되었습니다! [ 발주: {cnt_o}건 / 사전: {cnt_p}건 / 입찰: {cnt_b}건 ]")
 
-        add_history(f"{datetime.now().strftime('%m/%d %H:%M:%S')} ({keywords_input})") [cite: 1]
-        update_history_ui() [cite: 1]
+        add_history(f"{datetime.now().strftime('%m/%d %H:%M:%S')} ({keywords_input})")
+        update_history_ui()
 
-if any(x is not None for x in [st.session_state.df_order, st.session_state.df_prior, st.session_state.df_bid]): [cite: 1]
-    xl_data = convert_df_to_excel(st.session_state.df_order, st.session_state.df_prior, st.session_state.df_bid) [cite: 1]
-    download_container.download_button(label="📥 엑셀 다운로드", data=xl_data, file_name=f"나라장터 조회_{datetime.now().strftime('%Y%m%d')}.xlsx", use_container_width=True) [cite: 1]
+if any(x is not None for x in [st.session_state.df_order, st.session_state.df_prior, st.session_state.df_bid]):
+    xl_data = convert_df_to_excel(st.session_state.df_order, st.session_state.df_prior, st.session_state.df_bid)
+    download_container.download_button(label="📥 엑셀 다운로드", data=xl_data, file_name=f"나라장터 조회_{datetime.now().strftime('%Y%m%d')}.xlsx", use_container_width=True)
     
-    tabs_labels = [] [cite: 1]
-    if st.session_state.df_order is not None: tabs_labels.append("📊 발주계획") [cite: 1]
-    if st.session_state.df_prior is not None: tabs_labels.append("📝 사전규격공개") [cite: 1]
-    if st.session_state.df_bid is not None: tabs_labels.append("🔔 입찰공고") [cite: 1]
+    tabs_labels = []
+    if st.session_state.df_order is not None: tabs_labels.append("📊 발주계획")
+    if st.session_state.df_prior is not None: tabs_labels.append("📝 사전규격공개")
+    if st.session_state.df_bid is not None: tabs_labels.append("🔔 입찰공고")
     
-    if tabs_labels: [cite: 1]
-        tabs = st.tabs(tabs_labels) [cite: 1]
-        curr = 0 [cite: 1]
-        if st.session_state.df_order is not None: [cite: 1]
-            with tabs[curr]: [cite: 1]
-                df_v = st.session_state.df_order.copy() [cite: 1]
-                if not df_v.empty: df_v['총발주금액(원)'] = df_v['총발주금액(원)'].apply(lambda x: f"{x:,}") [cite: 1]
-                st.dataframe(df_v, use_container_width=True, hide_index=True, height=600) [cite: 1]
-            curr += 1 [cite: 1]
-        if st.session_state.df_prior is not None: [cite: 1]
-            with tabs[curr]: [cite: 1]
-                df_p = st.session_state.df_prior.copy() [cite: 1]
-                if not df_p.empty: df_p['배정예산액(원)'] = df_p['배정예산액(원)'].apply(lambda x: f"{x:,}" if x > 0 else "") [cite: 1]
-                st.dataframe(df_p, use_container_width=True, hide_index=True, height=600, column_config={"규격서URL": st.column_config.LinkColumn("규격서", display_text="🔗 다운로드")}) [cite: 1]
-            curr += 1 [cite: 1]
-        if st.session_state.df_bid is not None: [cite: 1]
-            with tabs[curr]: [cite: 1]
-                df_b = st.session_state.df_bid.copy() [cite: 1]
-                for col in ['배정예산(원)', '추정가격(원)', '입찰참가수수료', '예상 투찰하한가(원)']: [cite: 1]
-                    if not df_b.empty and col in df_b.columns: df_b[col] = df_b[col].apply(lambda x: f"{x:,}" if x > 0 else "") [cite: 1]
-                st.dataframe(df_b, use_container_width=True, hide_index=True, height=600, column_config={"공고링크(URL)": st.column_config.LinkColumn("원문 링크", display_text="🔗 공고이동")}) [cite: 1]
+    if tabs_labels:
+        tabs = st.tabs(tabs_labels)
+        curr = 0
+        if st.session_state.df_order is not None:
+            with tabs[curr]:
+                df_v = st.session_state.df_order.copy()
+                if not df_v.empty: df_v['총발주금액(원)'] = df_v['총발주금액(원)'].apply(lambda x: f"{x:,}")
+                st.dataframe(df_v, use_container_width=True, hide_index=True, height=600)
+            curr += 1
+        if st.session_state.df_prior is not None:
+            with tabs[curr]:
+                df_p = st.session_state.df_prior.copy()
+                if not df_p.empty: df_p['배정예산액(원)'] = df_p['배정예산액(원)'].apply(lambda x: f"{x:,}" if x > 0 else "")
+                st.dataframe(df_p, use_container_width=True, hide_index=True, height=600, column_config={"규격서URL": st.column_config.LinkColumn("규격서", display_text="🔗 다운로드")})
+            curr += 1
+        if st.session_state.df_bid is not None:
+            with tabs[curr]:
+                df_b = st.session_state.df_bid.copy()
+                for col in ['배정예산(원)', '추정가격(원)', '입찰참가수수료', '예상 투찰하한가(원)']:
+                    if not df_b.empty and col in df_b.columns: df_b[col] = df_b[col].apply(lambda x: f"{x:,}" if x > 0 else "")
+                st.dataframe(df_b, use_container_width=True, hide_index=True, height=600, column_config={"공고링크(URL)": st.column_config.LinkColumn("원문 링크", display_text="🔗 공고이동")})
