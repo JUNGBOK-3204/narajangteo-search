@@ -57,7 +57,7 @@ def fetch_data_from_api(url, params):
     while True:
         params["pageNo"] = str(page)
         
-        # R&D 공고 요청 수 10개로 축소 (안정성)
+        # R&D 공고 요청 수 10개로 축소 (서버 안정성 확보)
         if "msitBusinessNotice" in url:
             params["numOfRows"] = "10" 
             params["type"] = "xml"     
@@ -67,6 +67,7 @@ def fetch_data_from_api(url, params):
         try:
             response = requests.get(url, params=params, timeout=30)
             
+            # 500 에러 발생 시 처리
             if response.status_code == 500:
                 if page == 1:
                     st.error(f"⛔ 과기부 API 서버 오류(500). (요청수: 10건)")
@@ -83,6 +84,7 @@ def fetch_data_from_api(url, params):
                 row_data = {child.tag: (child.text or "").strip() for child in list(item)}
                 all_items.append(row_data)
             
+            # 페이지 종료 조건
             if "msitBusinessNotice" in url:
                 if len(items) < int(params["numOfRows"]) or page >= 30: break
             else:
@@ -259,11 +261,11 @@ def convert_df_to_excel(df_order, df_prior, df_bid, df_rd):
             '발주계획': {'left': ['사업명', '발주기관명'], 'right': ['총발주금액(원)']},
             '사전규격공개': {'left': ['사업명(품명)', '공고기관', '실수요기관'], 'right': ['배정예산액(원)']},
             '입찰공고': {'left': ['공고명', '공고기관', '수요기관'], 'right': ['배정예산(원)', '추정가격(원)', '입찰참가수수료', '예상 투찰하한가(원)']},
-            'RD과제공고': {'left': ['과제공고명', '공고기관'], 'right': []}
+            'R&D과제공고': {'left': ['과제공고명', '공고기관'], 'right': []}
         }
         custom_widths = {
             '발주계획': {'사업명': 60}, '사전규격공개': {'사업명(품명)': 60}, 
-            '입찰공고': {'공고명': 60, '개찰장소': 32}, 'RD과제공고': {'과제공고명': 60}
+            '입찰공고': {'공고명': 60, '개찰장소': 32}, 'R&D과제공고': {'과제공고명': 60}
         }
         header_fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
         urgent_font = Font(color="FF0000", bold=True)
@@ -337,7 +339,7 @@ def convert_df_to_excel(df_order, df_prior, df_bid, df_rd):
         apply_styles(df_order, '발주계획')
         apply_styles(df_prior, '사전규격공개')
         apply_styles(df_bid, '입찰공고')
-        apply_styles(df_rd, 'RD과제공고')
+        apply_styles(df_rd, 'R&D과제공고')
     return output.getvalue()
 
 # ==========================================
@@ -356,7 +358,7 @@ with col1:
     if os.path.exists(LOGO_FILENAME): st.image(LOGO_FILENAME, use_container_width=True)
 with col2:
     st.markdown("""
-        # 나라장터 & R&D 검색 시스템 <span style='font-size: 0.5em; color: #cccccc;'>v0.2 &nbsp;&nbsp; by 연구관리팀</span>
+        # 나라장터 & R&D 검색 시스템 <span style='font-size: 0.5em; color: #cccccc;'>v0.3 &nbsp;&nbsp; by 연구관리팀</span>
         <div style='margin-top: 5px;'>
             <span style='font-size: 15px; color: red; font-weight: bold;'>※ 본 프로그램의 검색 결과는 오류가 발생할 수 있으므로, 중요한 데이터는 꼭 실제 공고를 확인할 것!</span>
         </div>
@@ -386,9 +388,6 @@ with st.sidebar:
     st.divider()
     st.subheader("📋 조회 대상 선택")
     
-    # [수정] 안내 문구 삭제됨
-    
-    # [수정] 라벨명 변경 및 툴팁(help) 추가
     check_order = st.checkbox("발주계획 (일반/기술용역)", value=True, help="나라장터 발주계획 중 '일반용역'과 '기술용역' 분야를 조회합니다.")
     check_prior = st.checkbox("사전규격공개 (일반/기술용역)", value=True, help="사전규격공개 중 '일반용역'과 '기술용역' 분야를 조회합니다.")
     check_bid = st.checkbox("입찰공고 (일반/기술용역)", value=True, help="입찰공고 중 '일반용역'과 '기술용역' 분야를 조회합니다.")
@@ -396,16 +395,36 @@ with st.sidebar:
     
     st.divider()
 
-    keywords_input = st.text_input("🔑 키워드 (쉼표로 구분)", value="방사능")
+    # [수정] 툴팁 추가 및 라벨 수정
+    keywords_input = st.text_input(
+        "🔑 키워드 (쉼표로 구분)", 
+        value="방사능", 
+        help="검색하고 싶은 핵심 단어를 입력하세요. 쉼표(,)로 구분하여 여러 개를 동시에 검색할 수 있습니다. (예: 방사능, 원자력, 폐기물)"
+    )
     keywords = [k.strip() for k in keywords_input.split(",") if k.strip()]
-    exclude_input = st.text_input("🚫 제외 키워드", value="유지보수, X-ray")
+    
+    exclude_input = st.text_input(
+        "🚫 제외 키워드 (쉼표로 구분)", 
+        value="유지보수, X-ray", 
+        help="검색 결과 중에서 이 단어가 포함된 공고는 제외합니다. (예: 유지보수, 단순구매)"
+    )
     exclude_keywords = [k.strip() for k in exclude_input.split(",") if k.strip()]
     
     st.divider()
-    year = int(st.number_input("조회 연도 설정", min_value=2000, value=2026))
+    year = int(st.number_input(
+        "조회 연도 설정", 
+        min_value=2000, 
+        value=2026, 
+        help="검색할 공고의 게시 연도를 설정합니다. (기본값: 현재 연도)"
+    ))
     
-    # [수정] 입찰공고 체크 해제 시 슬라이더 비활성화
-    bid_months = st.slider("입찰공고 수집 기간 (최근 N개월)", 1, 12, 3, disabled=not check_bid)
+    # [수정] 입찰공고 체크 해제 시 슬라이더 비활성화 + 툴팁 추가
+    bid_months = st.slider(
+        "입찰공고 수집 기간 (최근 N개월)", 
+        1, 12, 3, 
+        disabled=not check_bid,
+        help="입찰공고는 데이터량이 많아 최근 N개월치만 수집합니다. 기간이 길수록 조회 시간이 늘어날 수 있습니다."
+    )
     
     st.divider()
     history_container = st.empty()
@@ -473,7 +492,7 @@ if any(x is not None for x in [st.session_state.df_order, st.session_state.df_pr
     if st.session_state.df_order is not None: tabs_labels.append("📊 발주계획")
     if st.session_state.df_prior is not None: tabs_labels.append("📝 사전규격공개")
     if st.session_state.df_bid is not None: tabs_labels.append("🔔 입찰공고")
-    if st.session_state.df_rd is not None: tabs_labels.append("🧪 RD과제공고")
+    if st.session_state.df_rd is not None: tabs_labels.append("🧪 R&D과제공고")
     
     if tabs_labels:
         tabs = st.tabs(tabs_labels)
