@@ -15,11 +15,13 @@ from openpyxl.styles import Alignment, Border, Side, PatternFill, Font
 HISTORY_FILE = "search_history.txt"
 
 def load_api_key():
+    """세션에 저장된 키를 확인합니다."""
     if 'user_api_key' in st.session_state:
         return st.session_state['user_api_key']
     return ""
 
 def save_api_key(key):
+    """입력받은 키를 세션에 저장합니다."""
     st.session_state['user_api_key'] = key.strip()
 
 def load_history():
@@ -46,63 +48,57 @@ def add_history(record):
 ORDER_PLAN_URL = "https://apis.data.go.kr/1230000/ao/OrderPlanSttusService/getOrderPlanSttusListServcPPSSrch"
 PRIOR_SPEC_URL = "https://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServcPPSSrch"
 BID_NOTICE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch"
-# 과기부 사업공고 API
+# 과기부 사업공고 API (API 특성상 서버 부하에 민감함)
 RD_NOTICE_URL = "http://apis.data.go.kr/1721000/msitBusinessNotice/getMsitBusinessNoticeList"
 
 def fetch_data_from_api(url, params):
     all_items = []
     page = 1
-    # 디버깅을 위해 API 응답을 저장할 변수
-    last_response_text = ""
     
     while True:
         params["pageNo"] = str(page)
+        
+        # 🚨 [수정 1] R&D 공고 요청 수 축소 (1000 -> 100)
+        # 500 에러 방지를 위해 한 번에 가져오는 양을 줄입니다.
         if "msitBusinessNotice" in url:
-            params["numOfRows"] = "1000"
+            params["numOfRows"] = "100" 
+            # 🚨 [수정 2] 파라미터 이름 정정 (resultType -> type)
+            params["type"] = "xml"
         else:
             params["numOfRows"] = "500"
             
         try:
-            response = requests.get(url, params=params, timeout=60)
-            last_response_text = response.text[:500] # 앞부분 500자만 확인
+            response = requests.get(url, params=params, timeout=30)
             
-            if response.status_code != 200: 
-                st.error(f"서버 오류 발생 (코드: {response.status_code})")
+            # 500 에러 발생 시 즉시 중단하고 사용자에게 알림
+            if response.status_code == 500:
+                if page == 1: # 첫 페이지부터 에러면 진짜 문제
+                    st.error(f"⛔ 과기부 API 서버 오류(500)가 발생했습니다.\n서버가 불안정하거나 요청량이 너무 많을 수 있습니다. 잠시 후 다시 시도해주세요.")
                 break
+            
+            if response.status_code != 200: break
             
             root = ET.fromstring(response.text)
-            
-            # 🚨 에러 메시지 체크 (SERVICE KEY ERROR 등)
-            header = root.find(".//cmmMsgHeader")
-            if header is not None:
-                err_msg = header.find("returnAuthMsg")
-                if err_msg is not None and "ERROR" in err_msg.text:
-                    st.error(f"⛔ API 인증 오류: {err_msg.text}\n(인증키가 아직 승인되지 않았거나 잘못되었습니다.)")
-                    return []
-
             items = root.findall(".//items/item")
-            if not items: 
-                # 아이템이 없는데 에러도 아니라면 정말 데이터가 없는 것
-                break
+            
+            if not items: break
             
             for item in items:
                 row_data = {child.tag: (child.text or "").strip() for child in list(item)}
                 all_items.append(row_data)
             
+            # 페이지 종료 조건 확인
             if "msitBusinessNotice" in url:
-                if len(items) < int(params["numOfRows"]): break
+                # R&D는 최근 300건(3페이지) 정도만 봐도 충분하므로 제한
+                if len(items) < int(params["numOfRows"]) or page >= 3: break
             else:
                 total_count_elem = root.find(".//body/totalCount")
                 if total_count_elem is not None:
                     if len(all_items) >= int(total_count_elem.text): break
             
             page += 1
-            if "msitBusinessNotice" in url and page > 1: break
             
         except Exception as e:
-            # 파싱 에러 시 원본 데이터 보여주기 (디버깅용)
-            if "msitBusinessNotice" in url and page == 1:
-                st.warning(f"데이터 파싱 실패. 원본 데이터:\n{last_response_text}")
             break
             
     return all_items
@@ -150,11 +146,15 @@ def process_rd_for_excel(df, keywords=[], exclude_keywords=[]):
     new_df = pd.DataFrame()
     for tag, kr_col in col_map.items():
         new_df[kr_col] = df[tag] if tag in df.columns else ""
+    
+    # 키워드 필터링 (OR 조건)
     if keywords:
         mask = new_df['과제공고명'].apply(lambda x: any(k in str(x) for k in keywords))
         new_df = new_df[mask]
+        
     if exclude_keywords:
         new_df = apply_exclusion_filter(new_df, '과제공고명', exclude_keywords)
+        
     if '공고일자' in new_df.columns:
         new_df.sort_values(by='공고일자', ascending=False, inplace=True)
     new_df.reset_index(drop=True, inplace=True)
@@ -433,7 +433,8 @@ if search_clicked:
         
         if check_rd:
             prog_bar.progress(20, text="🔍 R&D 공고 조회 중... (전체 목록 필터링)")
-            all_rd_raw = fetch_data_from_api(RD_NOTICE_URL, {"serviceKey": service_key, "resultType": "xml"})
+            # R&D API 호출: 검색어 파라미터 없음 (Python에서 필터링)
+            all_rd_raw = fetch_data_from_api(RD_NOTICE_URL, {"serviceKey": service_key})
             st.session_state.df_rd = process_rd_for_excel(pd.DataFrame(all_rd_raw).drop_duplicates(), keywords, exclude_keywords)
 
         if check_order or check_prior:
