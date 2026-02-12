@@ -15,11 +15,13 @@ from openpyxl.styles import Alignment, Border, Side, PatternFill, Font
 HISTORY_FILE = "search_history.txt"
 
 def load_api_key():
+    """세션에 저장된 키를 우선 확인하고, 없으면 빈 값을 반환합니다."""
     if 'user_api_key' in st.session_state:
         return st.session_state['user_api_key']
     return ""
 
 def save_api_key(key):
+    """입력받은 키를 현재 사용자의 세션에 저장합니다."""
     st.session_state['user_api_key'] = key.strip()
 
 def load_history():
@@ -38,7 +40,7 @@ def add_history(record):
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
             for item in history:
                 f.write(f"{item}\n")
-    except: pass
+    except: pass # 배포 환경에서 쓰기 권한이 없을 경우 대비
 
 # ==========================================
 # 2. 나라장터 API 수집 함수
@@ -302,7 +304,7 @@ if 'df_order' not in st.session_state: st.session_state.df_order = None
 if 'df_prior' not in st.session_state: st.session_state.df_prior = None
 if 'df_bid' not in st.session_state: st.session_state.df_bid = None
 
-LOGO_FILENAME = "radsol_logo.png" 
+LOGO_FILENAME = "radsol_logo.png"
 col1, col2, col3, col4 = st.columns([1, 6, 1.5, 1.5]) 
 with col1:
     if os.path.exists(LOGO_FILENAME): st.image(LOGO_FILENAME, use_container_width=True)
@@ -344,8 +346,8 @@ with st.sidebar:
     check_order = st.checkbox("발주계획", value=True)
     check_prior = st.checkbox("사전규격공개", value=True)
     check_bid = st.checkbox("입찰공고", value=True)
-    # 🎨 요청하신 안내 문구 삽입
-    st.markdown("<div style='color: #666666; font-size: 16px; font-weight: bold; margin-top: -15px; margin-bottom: 10px; margin-left: 28px;'>(일반/기술용역만 검색함)</div>", unsafe_allow_html=True)
+    # 🎨 문구 수정 및 간격 조정 (여백 15px 추가)
+    st.markdown("<div style='color: #666666; font-size: 16px; font-weight: bold; margin-top: 15px; margin-left: 28px;'>(일반/기술용역만 조회함)</div>", unsafe_allow_html=True)
     
     st.divider()
 
