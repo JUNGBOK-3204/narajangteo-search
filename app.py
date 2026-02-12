@@ -48,7 +48,6 @@ def add_history(record):
 ORDER_PLAN_URL = "https://apis.data.go.kr/1230000/ao/OrderPlanSttusService/getOrderPlanSttusListServcPPSSrch"
 PRIOR_SPEC_URL = "https://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServcPPSSrch"
 BID_NOTICE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch"
-# 과기부 사업공고 API
 RD_NOTICE_URL = "http://apis.data.go.kr/1721000/msitBusinessNotice/getMsitBusinessNoticeList"
 
 def fetch_data_from_api(url, params):
@@ -58,7 +57,7 @@ def fetch_data_from_api(url, params):
     while True:
         params["pageNo"] = str(page)
         
-        # 🚨 [수정 포인트] R&D 공고 요청 수 10개로 축소 (안정성 최우선)
+        # R&D 공고 요청 수 10개로 축소 (안정성)
         if "msitBusinessNotice" in url:
             params["numOfRows"] = "10" 
             params["type"] = "xml"     
@@ -68,7 +67,6 @@ def fetch_data_from_api(url, params):
         try:
             response = requests.get(url, params=params, timeout=30)
             
-            # 500 에러 체크
             if response.status_code == 500:
                 if page == 1:
                     st.error(f"⛔ 과기부 API 서버 오류(500). (요청수: 10건)")
@@ -85,9 +83,7 @@ def fetch_data_from_api(url, params):
                 row_data = {child.tag: (child.text or "").strip() for child in list(item)}
                 all_items.append(row_data)
             
-            # 페이지 종료 조건
             if "msitBusinessNotice" in url:
-                # 10개씩 가져오므로 최대 30페이지(300건)까지만 조회하도록 제한 (속도 고려)
                 if len(items) < int(params["numOfRows"]) or page >= 30: break
             else:
                 total_count_elem = root.find(".//body/totalCount")
@@ -145,7 +141,6 @@ def process_rd_for_excel(df, keywords=[], exclude_keywords=[]):
     for tag, kr_col in col_map.items():
         new_df[kr_col] = df[tag] if tag in df.columns else ""
     
-    # 키워드 필터링
     if keywords:
         mask = new_df['과제공고명'].apply(lambda x: any(k in str(x) for k in keywords))
         new_df = new_df[mask]
@@ -390,12 +385,14 @@ with st.sidebar:
     
     st.divider()
     st.subheader("📋 조회 대상 선택")
-    st.markdown("<div style='color: #666666; font-size: 15px; font-weight: bold; margin-top: -10px; margin-bottom: 10px;'>(일반/기술용역 및 R&D과제 조회)</div>", unsafe_allow_html=True)
     
-    check_order = st.checkbox("발주계획", value=True)
-    check_prior = st.checkbox("사전규격공개", value=True)
-    check_bid = st.checkbox("입찰공고", value=True)
-    check_rd = st.checkbox("R&D 과제 공고 (과기부 통합)", value=True)
+    # [수정] 안내 문구 삭제됨
+    
+    # [수정] 라벨명 변경 및 툴팁(help) 추가
+    check_order = st.checkbox("발주계획 (일반/기술용역)", value=True, help="나라장터 발주계획 중 '일반용역'과 '기술용역' 분야를 조회합니다.")
+    check_prior = st.checkbox("사전규격공개 (일반/기술용역)", value=True, help="사전규격공개 중 '일반용역'과 '기술용역' 분야를 조회합니다.")
+    check_bid = st.checkbox("입찰공고 (일반/기술용역)", value=True, help="입찰공고 중 '일반용역'과 '기술용역' 분야를 조회합니다.")
+    check_rd = st.checkbox("R&D 과제 공고 (과기부 통합)", value=True, help="과학기술정보통신부 및 범부처 R&D 과제 공고를 조회합니다.")
     
     st.divider()
 
@@ -406,7 +403,9 @@ with st.sidebar:
     
     st.divider()
     year = int(st.number_input("조회 연도 설정", min_value=2000, value=2026))
-    bid_months = st.slider("입찰공고 수집 기간 (최근 N개월)", 1, 12, 3)
+    
+    # [수정] 입찰공고 체크 해제 시 슬라이더 비활성화
+    bid_months = st.slider("입찰공고 수집 기간 (최근 N개월)", 1, 12, 3, disabled=not check_bid)
     
     st.divider()
     history_container = st.empty()
