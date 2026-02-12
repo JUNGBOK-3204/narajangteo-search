@@ -48,7 +48,7 @@ def add_history(record):
 ORDER_PLAN_URL = "https://apis.data.go.kr/1230000/ao/OrderPlanSttusService/getOrderPlanSttusListServcPPSSrch"
 PRIOR_SPEC_URL = "https://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServcPPSSrch"
 BID_NOTICE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch"
-# 과기부 사업공고 API (API 특성상 서버 부하에 민감함)
+# 과기부 사업공고 API
 RD_NOTICE_URL = "http://apis.data.go.kr/1721000/msitBusinessNotice/getMsitBusinessNoticeList"
 
 def fetch_data_from_api(url, params):
@@ -58,22 +58,20 @@ def fetch_data_from_api(url, params):
     while True:
         params["pageNo"] = str(page)
         
-        # 🚨 [수정 1] R&D 공고 요청 수 축소 (1000 -> 100)
-        # 500 에러 방지를 위해 한 번에 가져오는 양을 줄입니다.
+        # 🚨 [수정 포인트] R&D 공고 요청 수 10개로 축소 (안정성 최우선)
         if "msitBusinessNotice" in url:
-            params["numOfRows"] = "100" 
-            # 🚨 [수정 2] 파라미터 이름 정정 (resultType -> type)
-            params["type"] = "xml"
+            params["numOfRows"] = "10" 
+            params["type"] = "xml"     
         else:
             params["numOfRows"] = "500"
             
         try:
             response = requests.get(url, params=params, timeout=30)
             
-            # 500 에러 발생 시 즉시 중단하고 사용자에게 알림
+            # 500 에러 체크
             if response.status_code == 500:
-                if page == 1: # 첫 페이지부터 에러면 진짜 문제
-                    st.error(f"⛔ 과기부 API 서버 오류(500)가 발생했습니다.\n서버가 불안정하거나 요청량이 너무 많을 수 있습니다. 잠시 후 다시 시도해주세요.")
+                if page == 1:
+                    st.error(f"⛔ 과기부 API 서버 오류(500). (요청수: 10건)")
                 break
             
             if response.status_code != 200: break
@@ -87,10 +85,10 @@ def fetch_data_from_api(url, params):
                 row_data = {child.tag: (child.text or "").strip() for child in list(item)}
                 all_items.append(row_data)
             
-            # 페이지 종료 조건 확인
+            # 페이지 종료 조건
             if "msitBusinessNotice" in url:
-                # R&D는 최근 300건(3페이지) 정도만 봐도 충분하므로 제한
-                if len(items) < int(params["numOfRows"]) or page >= 3: break
+                # 10개씩 가져오므로 최대 30페이지(300건)까지만 조회하도록 제한 (속도 고려)
+                if len(items) < int(params["numOfRows"]) or page >= 30: break
             else:
                 total_count_elem = root.find(".//body/totalCount")
                 if total_count_elem is not None:
@@ -147,7 +145,7 @@ def process_rd_for_excel(df, keywords=[], exclude_keywords=[]):
     for tag, kr_col in col_map.items():
         new_df[kr_col] = df[tag] if tag in df.columns else ""
     
-    # 키워드 필터링 (OR 조건)
+    # 키워드 필터링
     if keywords:
         mask = new_df['과제공고명'].apply(lambda x: any(k in str(x) for k in keywords))
         new_df = new_df[mask]
@@ -433,7 +431,6 @@ if search_clicked:
         
         if check_rd:
             prog_bar.progress(20, text="🔍 R&D 공고 조회 중... (전체 목록 필터링)")
-            # R&D API 호출: 검색어 파라미터 없음 (Python에서 필터링)
             all_rd_raw = fetch_data_from_api(RD_NOTICE_URL, {"serviceKey": service_key})
             st.session_state.df_rd = process_rd_for_excel(pd.DataFrame(all_rd_raw).drop_duplicates(), keywords, exclude_keywords)
 
