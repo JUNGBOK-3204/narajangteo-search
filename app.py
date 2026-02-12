@@ -10,18 +10,16 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Border, Side, PatternFill, Font
 
 # ==========================================
-# 1. API 키 및 검색 기록 관리 기능 (배포용 수정)
+# 1. API 키 및 검색 기록 관리 기능
 # ==========================================
 HISTORY_FILE = "search_history.txt"
 
 def load_api_key():
-    """세션에 저장된 키를 우선 확인하고, 없으면 빈 값을 반환합니다."""
     if 'user_api_key' in st.session_state:
         return st.session_state['user_api_key']
     return ""
 
 def save_api_key(key):
-    """입력받은 키를 현재 사용자의 세션에 저장합니다."""
     st.session_state['user_api_key'] = key.strip()
 
 def load_history():
@@ -40,10 +38,10 @@ def add_history(record):
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
             for item in history:
                 f.write(f"{item}\n")
-    except: pass # 배포 환경에서 쓰기 권한이 없을 경우 대비
+    except: pass
 
 # ==========================================
-# 2. 나라장터 API 수집 함수 [수정 없음]
+# 2. 나라장터 API 수집 함수
 # ==========================================
 ORDER_PLAN_URL = "https://apis.data.go.kr/1230000/ao/OrderPlanSttusService/getOrderPlanSttusListServcPPSSrch"
 PRIOR_SPEC_URL = "https://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServcPPSSrch"
@@ -89,7 +87,7 @@ def fetch_bid_data_split(service_key, keywords, months=12, progress_callback=Non
     return all_results
 
 # ==========================================
-# 3. 데이터 가공 함수 [수정 없음]
+# 3. 데이터 가공 함수
 # ==========================================
 def get_val(row, possible_keys, default=''):
     row_lower = {k.lower(): v for k, v in row.items()}
@@ -207,7 +205,7 @@ def process_bid_for_excel(df, exclude_keywords=[]):
     return new_df
 
 # ==========================================
-# 4. 엑셀 서식화 [수정 없음]
+# 4. 엑셀 서식화
 # ==========================================
 def convert_df_to_excel(df_order, df_prior, df_bid):
     output = BytesIO()
@@ -346,6 +344,9 @@ with st.sidebar:
     check_order = st.checkbox("발주계획", value=True)
     check_prior = st.checkbox("사전규격공개", value=True)
     check_bid = st.checkbox("입찰공고", value=True)
+    # 🎨 요청하신 안내 문구 삽입
+    st.markdown("<div style='color: #666666; font-size: 16px; font-weight: bold; margin-top: -15px; margin-bottom: 10px; margin-left: 28px;'>(일반/기술용역만 검색함)</div>", unsafe_allow_html=True)
+    
     st.divider()
 
     keywords_input = st.text_input("🔑 키워드 (쉼표로 구분)", value="방사능")
@@ -399,7 +400,6 @@ if search_clicked:
         prog_bar.progress(100, text="✅ 완료!")
         time.sleep(0.5); prog_bar.empty()
         
-        # 건수 계산 및 성공 메시지 출력 (복구된 부분)
         cnt_o = len(st.session_state.df_order) if st.session_state.df_order is not None else 0
         cnt_p = len(st.session_state.df_prior) if st.session_state.df_prior is not None else 0
         cnt_b = len(st.session_state.df_bid) if st.session_state.df_bid is not None else 0
