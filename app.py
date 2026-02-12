@@ -43,33 +43,54 @@ def add_history(record):
     except: pass
 
 # ==========================================
-# 2. API URL 설정 (R&D 추가됨)
+# 2. API URL 설정 (URL 및 로직 수정됨)
 # ==========================================
 ORDER_PLAN_URL = "https://apis.data.go.kr/1230000/ao/OrderPlanSttusService/getOrderPlanSttusListServcPPSSrch"
 PRIOR_SPEC_URL = "https://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServcPPSSrch"
 BID_NOTICE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch"
-# 🆕 R&D 사업공고 API (NTIS 연동)
-RD_NOTICE_URL = "http://apis.data.go.kr/1710100/ntisInfoService/getProjectNoticeList"
+
+# 🆕 과학기술정보통신부 사업공고 API (스크린샷 기반 수정)
+# 서비스ID: 1721000, 오퍼레이션: getMsitBusinessNoticeList
+RD_NOTICE_URL = "http://apis.data.go.kr/1721000/msitBusinessNotice/getMsitBusinessNoticeList"
 
 def fetch_data_from_api(url, params):
     all_items = []
     page = 1
     while True:
         params["pageNo"] = str(page)
-        params["numOfRows"] = "500"
+        # R&D 공고는 검색어가 안 먹히므로 한 번에 많이 가져와서 Python에서 걸러야 함
+        if "msitBusinessNotice" in url:
+            params["numOfRows"] = "1000"  # 최근 1000건 조회
+        else:
+            params["numOfRows"] = "500"
+            
         try:
             response = requests.get(url, params=params, timeout=60)
             if response.status_code != 200: break
+            
+            # XML 파싱
             root = ET.fromstring(response.text)
             items = root.findall(".//items/item")
+            
+            # 결과가 없으면 중단
             if not items: break
+            
             for item in items:
                 row_data = {child.tag: (child.text or "").strip() for child in list(item)}
                 all_items.append(row_data)
-            total_count_elem = root.find(".//body/totalCount")
-            if total_count_elem is not None:
-                if len(all_items) >= int(total_count_elem.text): break
+            
+            # 페이징 처리: R&D API는 totalCount가 없을 수도 있어 items 갯수로 판단
+            if "msitBusinessNotice" in url:
+                if len(items) < int(params["numOfRows"]): break # 마지막 페이지
+            else:
+                total_count_elem = root.find(".//body/totalCount")
+                if total_count_elem is not None:
+                    if len(all_items) >= int(total_count_elem.text): break
+            
             page += 1
+            # R&D는 너무 많이 가져오면 느리므로 1페이지(최신 1000건)만 봐도 충분할 듯함
+            if "msitBusinessNotice" in url and page > 1: break 
+            
         except: break
     return all_items
 
@@ -91,7 +112,7 @@ def fetch_bid_data_split(service_key, keywords, months=12, progress_callback=Non
     return all_results
 
 # ==========================================
-# 3. 데이터 가공 함수 (R&D 추가됨)
+# 3. 데이터 가공 함수
 # ==========================================
 def get_val(row, possible_keys, default=''):
     row_lower = {k.lower(): v for k, v in row.items()}
@@ -113,26 +134,41 @@ def apply_exclusion_filter(df, target_col, exclude_keywords):
     mask = df[target_col].apply(lambda x: not any(exc in str(x) for exc in exclude_keywords))
     return df[mask]
 
-# 🆕 R&D 데이터 가공 함수
-def process_rd_for_excel(df, exclude_keywords=[]):
+# 🆕 R&D 데이터 가공 및 필터링 함수 (핵심 수정)
+def process_rd_for_excel(df, keywords=[], exclude_keywords=[]):
     if df is None or df.empty: return pd.DataFrame()
+    
+    # 1. API 출력결과 매핑 (스크린샷 기준)
+    # subject: 제목, deptName: 부서, regDate: 등록일, viewUrl: 링크
     col_map = {
-        'pjtNtceNm': '과제공고명', 'pjtNtceInsttNm': '공고기관', 
-        'pjtNtceAnncDt': '공고일자', 'pjtNtceBgnDt': '접수시작일', 
-        'pjtNtceEndDt': '접수종료일', 'pjtNtceUrl': '공고링크(URL)'
+        'subject': '과제공고명', 
+        'deptName': '공고기관', 
+        'regDate': '공고일자', 
+        'viewUrl': '공고링크(URL)'
     }
+    
     new_df = pd.DataFrame()
     for tag, kr_col in col_map.items():
-        found_col = None
-        for col in df.columns:
-            if col == tag: found_col = col; break
-        new_df[kr_col] = df[found_col] if found_col else ""
-        
+        # 데이터프레임에 해당 컬럼이 있는지 확인 후 매핑
+        if tag in df.columns:
+            new_df[kr_col] = df[tag]
+        else:
+            new_df[kr_col] = ""
+
+    # 2. 키워드 필터링 (API가 못하니 파이썬이 수행)
+    if keywords:
+        # 제목(subject)에 키워드가 하나라도 포함된 행만 남김
+        mask = new_df['과제공고명'].apply(lambda x: any(k in str(x) for k in keywords))
+        new_df = new_df[mask]
+
+    # 3. 제외 키워드 필터링
     if exclude_keywords:
         new_df = apply_exclusion_filter(new_df, '과제공고명', exclude_keywords)
     
+    # 4. 정렬 및 번호 매기기
     if '공고일자' in new_df.columns:
         new_df.sort_values(by='공고일자', ascending=False, inplace=True)
+    
     new_df.reset_index(drop=True, inplace=True)
     new_df.insert(0, 'No.', range(1, len(new_df) + 1))
     return new_df
@@ -233,7 +269,7 @@ def process_bid_for_excel(df, exclude_keywords=[]):
     return new_df
 
 # ==========================================
-# 4. 엑셀 서식화 (R&D 시트 추가)
+# 4. 엑셀 서식화
 # ==========================================
 def convert_df_to_excel(df_order, df_prior, df_bid, df_rd):
     output = BytesIO()
@@ -408,13 +444,14 @@ if search_clicked:
         inqry_bgn, inqry_end = f"{year}01010000", f"{year}12312359"
         total_kw = len(keywords)
         
-        # 🆕 R&D 데이터 수집
-        all_rd = []
+        # 🆕 R&D 데이터 수집 로직 (스크린샷 기반 수정)
         if check_rd:
-            for idx, kw in enumerate(keywords):
-                prog_bar.progress(int(20), text=f"🔍 R&D 공고 조회 중... ({kw})")
-                all_rd.extend(fetch_data_from_api(RD_NOTICE_URL, {"serviceKey": service_key, "pjtNtceNm": kw}))
-            st.session_state.df_rd = process_rd_for_excel(pd.DataFrame(all_rd).drop_duplicates(), exclude_keywords)
+            prog_bar.progress(20, text="🔍 R&D 공고 조회 중... (전체 목록 필터링)")
+            # R&D API는 키워드 검색을 지원하지 않으므로, 'pjtNtceNm' 등 파라미터를 넣지 않고
+            # 최근 1000건을 가져온 뒤 Python에서 필터링함 (params에 검색어 없음)
+            all_rd_raw = fetch_data_from_api(RD_NOTICE_URL, {"serviceKey": service_key, "resultType": "xml"})
+            # 필터링 수행
+            st.session_state.df_rd = process_rd_for_excel(pd.DataFrame(all_rd_raw).drop_duplicates(), keywords, exclude_keywords)
 
         if check_order or check_prior:
             all_o, all_p = [], []
