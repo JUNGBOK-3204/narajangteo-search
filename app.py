@@ -15,13 +15,11 @@ from openpyxl.styles import Alignment, Border, Side, PatternFill, Font
 HISTORY_FILE = "search_history.txt"
 
 def load_api_key():
-    """세션에 저장된 키를 확인합니다."""
     if 'user_api_key' in st.session_state:
         return st.session_state['user_api_key']
     return ""
 
 def save_api_key(key):
-    """입력받은 키를 세션에 저장합니다."""
     st.session_state['user_api_key'] = key.strip()
 
 def load_history():
@@ -43,55 +41,70 @@ def add_history(record):
     except: pass
 
 # ==========================================
-# 2. API URL 설정 (URL 및 로직 수정됨)
+# 2. API URL 설정
 # ==========================================
 ORDER_PLAN_URL = "https://apis.data.go.kr/1230000/ao/OrderPlanSttusService/getOrderPlanSttusListServcPPSSrch"
 PRIOR_SPEC_URL = "https://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServcPPSSrch"
 BID_NOTICE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch"
-
-# 🆕 과학기술정보통신부 사업공고 API (스크린샷 기반 수정)
-# 서비스ID: 1721000, 오퍼레이션: getMsitBusinessNoticeList
+# 과기부 사업공고 API
 RD_NOTICE_URL = "http://apis.data.go.kr/1721000/msitBusinessNotice/getMsitBusinessNoticeList"
 
 def fetch_data_from_api(url, params):
     all_items = []
     page = 1
+    # 디버깅을 위해 API 응답을 저장할 변수
+    last_response_text = ""
+    
     while True:
         params["pageNo"] = str(page)
-        # R&D 공고는 검색어가 안 먹히므로 한 번에 많이 가져와서 Python에서 걸러야 함
         if "msitBusinessNotice" in url:
-            params["numOfRows"] = "1000"  # 최근 1000건 조회
+            params["numOfRows"] = "1000"
         else:
             params["numOfRows"] = "500"
             
         try:
             response = requests.get(url, params=params, timeout=60)
-            if response.status_code != 200: break
+            last_response_text = response.text[:500] # 앞부분 500자만 확인
             
-            # XML 파싱
+            if response.status_code != 200: 
+                st.error(f"서버 오류 발생 (코드: {response.status_code})")
+                break
+            
             root = ET.fromstring(response.text)
-            items = root.findall(".//items/item")
             
-            # 결과가 없으면 중단
-            if not items: break
+            # 🚨 에러 메시지 체크 (SERVICE KEY ERROR 등)
+            header = root.find(".//cmmMsgHeader")
+            if header is not None:
+                err_msg = header.find("returnAuthMsg")
+                if err_msg is not None and "ERROR" in err_msg.text:
+                    st.error(f"⛔ API 인증 오류: {err_msg.text}\n(인증키가 아직 승인되지 않았거나 잘못되었습니다.)")
+                    return []
+
+            items = root.findall(".//items/item")
+            if not items: 
+                # 아이템이 없는데 에러도 아니라면 정말 데이터가 없는 것
+                break
             
             for item in items:
                 row_data = {child.tag: (child.text or "").strip() for child in list(item)}
                 all_items.append(row_data)
             
-            # 페이징 처리: R&D API는 totalCount가 없을 수도 있어 items 갯수로 판단
             if "msitBusinessNotice" in url:
-                if len(items) < int(params["numOfRows"]): break # 마지막 페이지
+                if len(items) < int(params["numOfRows"]): break
             else:
                 total_count_elem = root.find(".//body/totalCount")
                 if total_count_elem is not None:
                     if len(all_items) >= int(total_count_elem.text): break
             
             page += 1
-            # R&D는 너무 많이 가져오면 느리므로 1페이지(최신 1000건)만 봐도 충분할 듯함
-            if "msitBusinessNotice" in url and page > 1: break 
+            if "msitBusinessNotice" in url and page > 1: break
             
-        except: break
+        except Exception as e:
+            # 파싱 에러 시 원본 데이터 보여주기 (디버깅용)
+            if "msitBusinessNotice" in url and page == 1:
+                st.warning(f"데이터 파싱 실패. 원본 데이터:\n{last_response_text}")
+            break
+            
     return all_items
 
 def fetch_bid_data_split(service_key, keywords, months=12, progress_callback=None):
@@ -117,11 +130,9 @@ def fetch_bid_data_split(service_key, keywords, months=12, progress_callback=Non
 def get_val(row, possible_keys, default=''):
     row_lower = {k.lower(): v for k, v in row.items()}
     for k in possible_keys:
-        if k in row and pd.notna(row[k]) and str(row[k]).strip() != '':
-            return str(row[k]).strip()
+        if k in row and pd.notna(row[k]) and str(row[k]).strip() != '': return str(row[k]).strip()
         k_lower = k.lower()
-        if k_lower in row_lower and pd.notna(row_lower[k_lower]) and str(row_lower[k_lower]).strip() != '':
-            return str(row_lower[k_lower]).strip()
+        if k_lower in row_lower and pd.notna(row_lower[k_lower]) and str(row_lower[k_lower]).strip() != '': return str(row_lower[k_lower]).strip()
     return default
 
 def get_clean_val(row, possible_keys):
@@ -129,46 +140,23 @@ def get_clean_val(row, possible_keys):
     return val if val else ""
 
 def apply_exclusion_filter(df, target_col, exclude_keywords):
-    if df.empty or not exclude_keywords:
-        return df
+    if df.empty or not exclude_keywords: return df
     mask = df[target_col].apply(lambda x: not any(exc in str(x) for exc in exclude_keywords))
     return df[mask]
 
-# 🆕 R&D 데이터 가공 및 필터링 함수 (핵심 수정)
 def process_rd_for_excel(df, keywords=[], exclude_keywords=[]):
     if df is None or df.empty: return pd.DataFrame()
-    
-    # 1. API 출력결과 매핑 (스크린샷 기준)
-    # subject: 제목, deptName: 부서, regDate: 등록일, viewUrl: 링크
-    col_map = {
-        'subject': '과제공고명', 
-        'deptName': '공고기관', 
-        'regDate': '공고일자', 
-        'viewUrl': '공고링크(URL)'
-    }
-    
+    col_map = {'subject': '과제공고명', 'deptName': '공고기관', 'regDate': '공고일자', 'viewUrl': '공고링크(URL)'}
     new_df = pd.DataFrame()
     for tag, kr_col in col_map.items():
-        # 데이터프레임에 해당 컬럼이 있는지 확인 후 매핑
-        if tag in df.columns:
-            new_df[kr_col] = df[tag]
-        else:
-            new_df[kr_col] = ""
-
-    # 2. 키워드 필터링 (API가 못하니 파이썬이 수행)
+        new_df[kr_col] = df[tag] if tag in df.columns else ""
     if keywords:
-        # 제목(subject)에 키워드가 하나라도 포함된 행만 남김
         mask = new_df['과제공고명'].apply(lambda x: any(k in str(x) for k in keywords))
         new_df = new_df[mask]
-
-    # 3. 제외 키워드 필터링
     if exclude_keywords:
         new_df = apply_exclusion_filter(new_df, '과제공고명', exclude_keywords)
-    
-    # 4. 정렬 및 번호 매기기
     if '공고일자' in new_df.columns:
         new_df.sort_values(by='공고일자', ascending=False, inplace=True)
-    
     new_df.reset_index(drop=True, inplace=True)
     new_df.insert(0, 'No.', range(1, len(new_df) + 1))
     return new_df
@@ -409,7 +397,6 @@ with st.sidebar:
     check_order = st.checkbox("발주계획", value=True)
     check_prior = st.checkbox("사전규격공개", value=True)
     check_bid = st.checkbox("입찰공고", value=True)
-    # 🆕 R&D 체크박스 추가 확인
     check_rd = st.checkbox("R&D 과제 공고 (과기부 통합)", value=True)
     
     st.divider()
@@ -444,13 +431,9 @@ if search_clicked:
         inqry_bgn, inqry_end = f"{year}01010000", f"{year}12312359"
         total_kw = len(keywords)
         
-        # 🆕 R&D 데이터 수집 로직 (스크린샷 기반 수정)
         if check_rd:
             prog_bar.progress(20, text="🔍 R&D 공고 조회 중... (전체 목록 필터링)")
-            # R&D API는 키워드 검색을 지원하지 않으므로, 'pjtNtceNm' 등 파라미터를 넣지 않고
-            # 최근 1000건을 가져온 뒤 Python에서 필터링함 (params에 검색어 없음)
             all_rd_raw = fetch_data_from_api(RD_NOTICE_URL, {"serviceKey": service_key, "resultType": "xml"})
-            # 필터링 수행
             st.session_state.df_rd = process_rd_for_excel(pd.DataFrame(all_rd_raw).drop_duplicates(), keywords, exclude_keywords)
 
         if check_order or check_prior:
