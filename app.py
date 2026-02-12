@@ -88,16 +88,6 @@ def fetch_bid_data_split(service_key, keywords, months=12, progress_callback=Non
         time.sleep(0.1)
     return all_results
 
-def filter_data(data_list, keywords, service_types=None):
-    filtered = []
-    for row in data_list:
-        if keywords:
-            row_text = " ".join(str(val) for val in row.values())
-            if not any(kw in row_text for kw in keywords):
-                continue
-        filtered.append(row)
-    return filtered
-
 # ==========================================
 # 3. 데이터 가공 함수 [수정 없음]
 # ==========================================
@@ -306,7 +296,7 @@ def convert_df_to_excel(df_order, df_prior, df_bid):
     return output.getvalue()
 
 # ==========================================
-# 5. UI 및 메인 로직 (배포용 수정 포함)
+# 5. UI 및 메인 로직
 # ==========================================
 st.set_page_config(page_title="나라장터 검색 시스템", layout="wide")
 
@@ -335,7 +325,6 @@ with col4:
 with st.sidebar:
     st.header("⚙️ 검색 설정")
     
-    # 세션 상태를 활용한 API 키 입력 방식
     saved_key = load_api_key()
     with st.expander("🔐 내 API Key 설정", expanded=(not saved_key)):
         service_key_input = st.text_input("공공데이터포털 인증키", value=saved_key, type="password", help="본인의 개인 인증키를 입력하세요. 이 키는 세션이 유지되는 동안에만 사용됩니다.")
@@ -409,6 +398,13 @@ if search_clicked:
         
         prog_bar.progress(100, text="✅ 완료!")
         time.sleep(0.5); prog_bar.empty()
+        
+        # 건수 계산 및 성공 메시지 출력 (복구된 부분)
+        cnt_o = len(st.session_state.df_order) if st.session_state.df_order is not None else 0
+        cnt_p = len(st.session_state.df_prior) if st.session_state.df_prior is not None else 0
+        cnt_b = len(st.session_state.df_bid) if st.session_state.df_bid is not None else 0
+        st.success(f"✅ 조회가 완료되었습니다! [ 발주: {cnt_o}건 / 사전: {cnt_p}건 / 입찰: {cnt_b}건 ]")
+
         add_history(f"{datetime.now().strftime('%m/%d %H:%M:%S')} ({keywords_input})")
         update_history_ui()
 
