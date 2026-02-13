@@ -48,7 +48,6 @@ def add_history(record):
 ORDER_PLAN_URL = "https://apis.data.go.kr/1230000/ao/OrderPlanSttusService/getOrderPlanSttusListServcPPSSrch"
 PRIOR_SPEC_URL = "https://apis.data.go.kr/1230000/ao/HrcspSsstndrdInfoService/getPublicPrcureThngInfoServcPPSSrch"
 BID_NOTICE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch"
-RD_NOTICE_URL = "http://apis.data.go.kr/1721000/msitBusinessNotice/getMsitBusinessNoticeList"
 
 def fetch_data_from_api(url, params):
     all_items = []
@@ -56,22 +55,10 @@ def fetch_data_from_api(url, params):
     
     while True:
         params["pageNo"] = str(page)
-        
-        # R&D 공고 요청 수 10개로 축소 (서버 안정성 확보)
-        if "msitBusinessNotice" in url:
-            params["numOfRows"] = "10" 
-            params["type"] = "xml"     
-        else:
-            params["numOfRows"] = "500"
+        params["numOfRows"] = "500"
             
         try:
             response = requests.get(url, params=params, timeout=30)
-            
-            # 500 에러 발생 시 처리
-            if response.status_code == 500:
-                if page == 1:
-                    st.error(f"⛔ 과기부 API 서버 오류(500). (요청수: 10건)")
-                break
             
             if response.status_code != 200: break
             
@@ -84,13 +71,9 @@ def fetch_data_from_api(url, params):
                 row_data = {child.tag: (child.text or "").strip() for child in list(item)}
                 all_items.append(row_data)
             
-            # 페이지 종료 조건
-            if "msitBusinessNotice" in url:
-                if len(items) < int(params["numOfRows"]) or page >= 30: break
-            else:
-                total_count_elem = root.find(".//body/totalCount")
-                if total_count_elem is not None:
-                    if len(all_items) >= int(total_count_elem.text): break
+            total_count_elem = root.find(".//body/totalCount")
+            if total_count_elem is not None:
+                if len(all_items) >= int(total_count_elem.text): break
             
             page += 1
             
@@ -135,26 +118,6 @@ def apply_exclusion_filter(df, target_col, exclude_keywords):
     if df.empty or not exclude_keywords: return df
     mask = df[target_col].apply(lambda x: not any(exc in str(x) for exc in exclude_keywords))
     return df[mask]
-
-def process_rd_for_excel(df, keywords=[], exclude_keywords=[]):
-    if df is None or df.empty: return pd.DataFrame()
-    col_map = {'subject': '과제공고명', 'deptName': '공고기관', 'regDate': '공고일자', 'viewUrl': '공고링크(URL)'}
-    new_df = pd.DataFrame()
-    for tag, kr_col in col_map.items():
-        new_df[kr_col] = df[tag] if tag in df.columns else ""
-    
-    if keywords:
-        mask = new_df['과제공고명'].apply(lambda x: any(k in str(x) for k in keywords))
-        new_df = new_df[mask]
-        
-    if exclude_keywords:
-        new_df = apply_exclusion_filter(new_df, '과제공고명', exclude_keywords)
-        
-    if '공고일자' in new_df.columns:
-        new_df.sort_values(by='공고일자', ascending=False, inplace=True)
-    new_df.reset_index(drop=True, inplace=True)
-    new_df.insert(0, 'No.', range(1, len(new_df) + 1))
-    return new_df
 
 def process_order_for_excel(df, exclude_keywords=[]):
     if df is None or df.empty: return pd.DataFrame()
@@ -254,18 +217,17 @@ def process_bid_for_excel(df, exclude_keywords=[]):
 # ==========================================
 # 4. 엑셀 서식화
 # ==========================================
-def convert_df_to_excel(df_order, df_prior, df_bid, df_rd):
+def convert_df_to_excel(df_order, df_prior, df_bid):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         align_rules = {
             '발주계획': {'left': ['사업명', '발주기관명'], 'right': ['총발주금액(원)']},
             '사전규격공개': {'left': ['사업명(품명)', '공고기관', '실수요기관'], 'right': ['배정예산액(원)']},
             '입찰공고': {'left': ['공고명', '공고기관', '수요기관'], 'right': ['배정예산(원)', '추정가격(원)', '입찰참가수수료', '예상 투찰하한가(원)']},
-            'R&D과제공고': {'left': ['과제공고명', '공고기관'], 'right': []}
         }
         custom_widths = {
             '발주계획': {'사업명': 60}, '사전규격공개': {'사업명(품명)': 60}, 
-            '입찰공고': {'공고명': 60, '개찰장소': 32}, 'R&D과제공고': {'과제공고명': 60}
+            '입찰공고': {'공고명': 60, '개찰장소': 32}
         }
         header_fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
         urgent_font = Font(color="FF0000", bold=True)
@@ -339,18 +301,16 @@ def convert_df_to_excel(df_order, df_prior, df_bid, df_rd):
         apply_styles(df_order, '발주계획')
         apply_styles(df_prior, '사전규격공개')
         apply_styles(df_bid, '입찰공고')
-        apply_styles(df_rd, 'R&D과제공고')
     return output.getvalue()
 
 # ==========================================
 # 5. UI 및 메인 로직
 # ==========================================
-st.set_page_config(page_title="나라장터 & R&D 검색 시스템", layout="wide")
+st.set_page_config(page_title="나라장터 검색 시스템", layout="wide")
 
 if 'df_order' not in st.session_state: st.session_state.df_order = None
 if 'df_prior' not in st.session_state: st.session_state.df_prior = None
 if 'df_bid' not in st.session_state: st.session_state.df_bid = None
-if 'df_rd' not in st.session_state: st.session_state.df_rd = None
 
 LOGO_FILENAME = "radsol_logo.png"
 col1, col2, col3, col4 = st.columns([1, 6, 1.5, 1.5])
@@ -358,7 +318,7 @@ with col1:
     if os.path.exists(LOGO_FILENAME): st.image(LOGO_FILENAME, use_container_width=True)
 with col2:
     st.markdown("""
-        # 나라장터 & R&D 검색 시스템 <span style='font-size: 0.5em; color: #cccccc;'>v0.3 &nbsp;&nbsp; by 연구관리팀</span>
+        # 나라장터 검색 시스템 <span style='font-size: 0.5em; color: #cccccc;'>v0.4 &nbsp;&nbsp; by 연구관리팀</span>
         <div style='margin-top: 5px;'>
             <span style='font-size: 15px; color: red; font-weight: bold;'>※ 본 프로그램의 검색 결과는 오류가 발생할 수 있으므로, 중요한 데이터는 꼭 실제 공고를 확인할 것!</span>
         </div>
@@ -391,7 +351,6 @@ with st.sidebar:
     check_order = st.checkbox("발주계획 (일반/기술용역)", value=True, help="나라장터 발주계획 중 '일반용역'과 '기술용역' 분야를 조회합니다.")
     check_prior = st.checkbox("사전규격공개 (일반/기술용역)", value=True, help="사전규격공개 중 '일반용역'과 '기술용역' 분야를 조회합니다.")
     check_bid = st.checkbox("입찰공고 (일반/기술용역)", value=True, help="입찰공고 중 '일반용역'과 '기술용역' 분야를 조회합니다.")
-    check_rd = st.checkbox("R&D 과제 공고 (과기부 통합)", value=True, help="과학기술정보통신부 및 범부처 R&D 과제 공고를 조회합니다.")
     
     st.divider()
 
@@ -411,7 +370,6 @@ with st.sidebar:
     
     st.divider()
     
-    # [수정 완료] 도움말 문구 구체화
     year = int(st.number_input(
         "조회 연도 설정", 
         min_value=2000, 
@@ -441,17 +399,11 @@ if search_clicked:
         st.session_state.df_order = None
         st.session_state.df_prior = None
         st.session_state.df_bid = None
-        st.session_state.df_rd = None
         
         prog_bar = st.progress(0, text="데이터 수집 시작...")
         inqry_bgn, inqry_end = f"{year}01010000", f"{year}12312359"
         total_kw = len(keywords)
         
-        if check_rd:
-            prog_bar.progress(20, text="🔍 R&D 공고 조회 중... (전체 목록 필터링)")
-            all_rd_raw = fetch_data_from_api(RD_NOTICE_URL, {"serviceKey": service_key})
-            st.session_state.df_rd = process_rd_for_excel(pd.DataFrame(all_rd_raw).drop_duplicates(), keywords, exclude_keywords)
-
         if check_order or check_prior:
             all_o, all_p = [], []
             for idx, kw in enumerate(keywords):
@@ -478,21 +430,19 @@ if search_clicked:
         cnt_o = len(st.session_state.df_order) if st.session_state.df_order is not None else 0
         cnt_p = len(st.session_state.df_prior) if st.session_state.df_prior is not None else 0
         cnt_b = len(st.session_state.df_bid) if st.session_state.df_bid is not None else 0
-        cnt_r = len(st.session_state.df_rd) if st.session_state.df_rd is not None else 0
-        st.success(f"✅ 조회가 완료되었습니다! [ 발주: {cnt_o}건 / 사전: {cnt_p}건 / 입찰: {cnt_b}건 / R&D: {cnt_r}건 ]")
+        st.success(f"✅ 조회가 완료되었습니다! [ 발주: {cnt_o}건 / 사전: {cnt_p}건 / 입찰: {cnt_b}건 ]")
 
         add_history(f"{datetime.now().strftime('%m/%d %H:%M:%S')} ({keywords_input})")
         update_history_ui()
 
-if any(x is not None for x in [st.session_state.df_order, st.session_state.df_prior, st.session_state.df_bid, st.session_state.df_rd]):
-    xl_data = convert_df_to_excel(st.session_state.df_order, st.session_state.df_prior, st.session_state.df_bid, st.session_state.df_rd)
+if any(x is not None for x in [st.session_state.df_order, st.session_state.df_prior, st.session_state.df_bid]):
+    xl_data = convert_df_to_excel(st.session_state.df_order, st.session_state.df_prior, st.session_state.df_bid)
     download_container.download_button(label="📥 엑셀 다운로드", data=xl_data, file_name=f"통합조회_{datetime.now().strftime('%Y%m%d')}.xlsx", use_container_width=True)
     
     tabs_labels = []
     if st.session_state.df_order is not None: tabs_labels.append("📊 발주계획")
     if st.session_state.df_prior is not None: tabs_labels.append("📝 사전규격공개")
     if st.session_state.df_bid is not None: tabs_labels.append("🔔 입찰공고")
-    if st.session_state.df_rd is not None: tabs_labels.append("🧪 R&D과제공고")
     
     if tabs_labels:
         tabs = st.tabs(tabs_labels)
@@ -516,7 +466,3 @@ if any(x is not None for x in [st.session_state.df_order, st.session_state.df_pr
                     if not df_b.empty and col in df_b.columns: df_b[col] = df_b[col].apply(lambda x: f"{x:,}" if x > 0 else "")
                 st.dataframe(df_b, use_container_width=True, hide_index=True, height=600, column_config={"공고링크(URL)": st.column_config.LinkColumn("원문 링크", display_text="🔗 공고이동")})
             curr += 1
-        if st.session_state.df_rd is not None:
-            with tabs[curr]:
-                df_r = st.session_state.df_rd.copy()
-                st.dataframe(df_r, use_container_width=True, hide_index=True, height=600, column_config={"공고링크(URL)": st.column_config.LinkColumn("원문 링크", display_text="🔗 공고이동")})
