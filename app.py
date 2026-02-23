@@ -135,7 +135,10 @@ def process_order_for_excel(df, exclude_keywords=[]):
     if '발주시기' in new_df.columns:
         new_df.sort_values(by='발주시기', ascending=True, inplace=True)
     new_df.reset_index(drop=True, inplace=True)
-    new_df.insert(0, 'No.', range(1, len(new_df) + 1))
+    
+    # 컬럼 추가 (검토일시 Column A, No. Column B)
+    new_df.insert(0, '검토일시', '')
+    new_df.insert(1, 'No.', range(1, len(new_df) + 1))
     return new_df
 
 def process_prior_for_excel(df, exclude_keywords=[]):
@@ -168,7 +171,10 @@ def process_prior_for_excel(df, exclude_keywords=[]):
     if '공개일시' in new_df.columns:
         new_df.sort_values(by='공개일시', ascending=True, inplace=True)
     new_df.reset_index(drop=True, inplace=True)
-    new_df.insert(0, 'No.', range(1, len(new_df) + 1))
+    
+    # 컬럼 추가 (검토일시 Column A, No. Column B)
+    new_df.insert(0, '검토일시', '')
+    new_df.insert(1, 'No.', range(1, len(new_df) + 1))
     return new_df
 
 def process_bid_for_excel(df, exclude_keywords=[]):
@@ -211,7 +217,10 @@ def process_bid_for_excel(df, exclude_keywords=[]):
     if '게시일시' in new_df.columns:
         new_df.sort_values(by='게시일시', ascending=True, inplace=True)
     new_df.reset_index(drop=True, inplace=True)
-    new_df.insert(0, 'No.', range(1, len(new_df) + 1))
+    
+    # 컬럼 추가 (검토일시 Column A, No. Column B)
+    new_df.insert(0, '검토일시', '')
+    new_df.insert(1, 'No.', range(1, len(new_df) + 1))
     return new_df
 
 # ==========================================
@@ -226,14 +235,14 @@ def convert_df_to_excel(df_order, df_prior, df_bid):
             '입찰공고': {'left': ['공고명', '공고기관', '수요기관'], 'right': ['배정예산(원)', '추정가격(원)', '입찰참가수수료', '예상 투찰하한가(원)']},
         }
         custom_widths = {
-            '발주계획': {'사업명': 60}, '사전규격공개': {'사업명(품명)': 60}, 
-            '입찰공고': {'공고명': 60, '개찰장소': 32}
+            '발주계획': {'검토일시': 15, '사업명': 60}, 
+            '사전규격공개': {'검토일시': 15, '사업명(품명)': 60}, 
+            '입찰공고': {'검토일시': 15, '공고명': 60, '개찰장소': 32}
         }
         header_fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
-        urgent_font = Font(color="FF0000", bold=True)
         link_font = Font(color="0000FF", underline="single")
-        yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-        now = datetime.now()
+        thin_side = Side(style='thin')
+        border_all = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
 
         def apply_styles(df, sheet_name):
             if df is None: return
@@ -250,10 +259,6 @@ def convert_df_to_excel(df_order, df_prior, df_bid):
             header_map = {}
             for cell in ws[1]: header_map[cell.column] = cell.value
             
-            deadline_col_idx = -1
-            for idx, cell in enumerate(ws[1]):
-                if cell.value in ['입찰마감일시', '공고종료일']: deadline_col_idx = idx
-
             for column in ws.columns:
                 column_letter = get_column_letter(column[0].column)
                 col_name = header_map.get(column[0].column)
@@ -272,31 +277,20 @@ def convert_df_to_excel(df_order, df_prior, df_bid):
                 ws.column_dimensions[column_letter].width = adjusted_width
 
             for row in ws.iter_rows(min_row=2):
-                is_urgent = False
-                if deadline_col_idx != -1:
-                    try:
-                        cell_val = row[deadline_col_idx].value
-                        if cell_val:
-                            deadline = pd.to_datetime(str(cell_val))
-                            if (deadline - now).days <= 7 and (deadline > now): is_urgent = True
-                    except: pass
                 for cell in row:
-                    cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+                    cell.border = border_all
                     col_name = header_map.get(cell.column)
                     if col_name in money_cols and isinstance(cell.value, (int, float)): cell.number_format = '#,##0'
                     if col_name in rules['left']: cell.alignment = Alignment(horizontal='left', vertical='center', indent=1)
                     elif col_name in rules['right']: cell.alignment = Alignment(horizontal='right', vertical='center', indent=1)
                     else: cell.alignment = Alignment(horizontal='center', vertical='center')
-                    if is_urgent:
-                        cell.font = urgent_font
-                        cell.fill = yellow_fill
+                    
                     if col_name in ['규격서URL', '공고링크(URL)', '공고URL'] and cell.value:
                         val = str(cell.value); cell.hyperlink = val; cell.font = link_font
-                        if is_urgent: cell.fill = yellow_fill
 
             for cell in ws[1]:
                 cell.alignment = Alignment(horizontal='center', vertical='center'); cell.fill = header_fill
-                cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+                cell.border = border_all
 
         apply_styles(df_order, '발주계획')
         apply_styles(df_prior, '사전규격공개')
